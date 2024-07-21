@@ -1,0 +1,25 @@
+{
+  "priority": 20,
+  "conditions": {
+    "any": [
+      {
+        "priority": 10,
+        "all": [
+
+          {
+            "fact": "user",
+            "operator": "endsWith",
+            "value": "Sooter",
+            "path": "$.lastName"
+          }
+        ]
+      }
+    ]
+  },
+  "event": {
+    "type": "fouledOut",
+    "params": {
+      "message": "Player has fouled out!"
+    }
+  }
+}
