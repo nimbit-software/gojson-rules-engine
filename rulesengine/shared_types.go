@@ -92,5 +92,5 @@ type RuleEngineOptions struct {
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver // TODO
+	PathResolver              PathResolver
 }
