@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 // ExecutionContext holds metadata and control flags for rule execution.
 type ExecutionContext struct {
 	context.Context
+	Cancel    context.CancelFunc
 	StopEarly bool
 	Message   string
 	Errors    []error

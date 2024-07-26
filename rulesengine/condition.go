@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"encoding/json"
@@ -93,7 +93,6 @@ func NewCondition(properties map[string]interface{}) (*Condition, error) {
 		}
 
 		cond.Fact = properties["fact"].(string)
-		// TODO SPLIT PATH OR USE
 		if path, ok := properties["path"]; ok {
 			cond.Path = path.(string)
 		} else {

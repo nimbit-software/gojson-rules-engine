@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	rulesEngine "github.com/nimbit-software/gojson-rules-engine/src"
+	rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
 	"os"
-	"time"
 )
 
 func main() {
+	//jsonBytes, err := os.ReadFile("examples/game_foul_rule.json")
 	jsonBytes, err := os.ReadFile("examples/endsWith-rule.json")
 	if err != nil {
 		panic(err)
@@ -20,22 +20,54 @@ func main() {
 		panic(err)
 	}
 
-	cart := map[string]interface{}{
+	data := map[string]interface{}{
 		"personalFoulCount": 1,
 		"gameDuration":      40,
 		"user": map[string]interface{}{
-			"lastName": "Sooter",
+			"lastName":  "Sooter",
+			"firstName": "David",
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dataByte := []byte(`{
+        "personalFoulCount": 6,
+        "gameDuration": 40,
+		"name": "John",
+        "user": {
+			"firstName": "David",
+            "lastName": "Sooter"
+        }
+    }`)
+
+	ruleMap["onSuccess"] = func(ruleResult *rulesEngine.RuleResult) {
+		fmt.Println("Rule succeeded")
+	}
+
+	ruleMap["onFailure"] = func(ruleResult *rulesEngine.RuleResult) {
+		fmt.Println("Rule succeeded")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	engine := rulesEngine.NewEngine(nil, nil)
+	engine := rulesEngine.NewEngine(nil, &rulesEngine.RuleEngineOptions{
+		AllowUndefinedFacts:       true,
+		ReplaceFactsInEventParams: true,
+	})
+
+	engine.AddFact("fullName", func(params map[string]interface{}, almanac *rulesEngine.Almanac) interface{} {
+		almanac.GetValue("user.firstName")
+		return "bla"
+	}, nil)
 
 	engine.AddRule(ruleMap)
+	json, _ := engine.GetRules()[0].ToJSON(false)
+	rulesEngine.NewRule(json)
+	fmt.Printf("%+v\n", json)
 
-	res, err := engine.Run(ctx, cart)
+	res, err := engine.Run(ctx, dataByte)
+	printResults(res)
+	res, err = engine.Run(ctx, data)
 
 	printResults(res)
 }

@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"fmt"
@@ -25,8 +25,6 @@ func isDebugMode() bool {
 	if debugEnvExists && strings.Contains(debugEnv, "json-rules-engine") {
 		return true
 	}
-
-	// Optionally, handle local storage or other debugging mechanisms here
 
 	return false
 }

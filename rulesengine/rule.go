@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"encoding/json"
@@ -30,7 +30,6 @@ func NewRule(options interface{}) (*Rule, error) {
 		},
 		bus: EventBus.New(),
 	}
-
 	var opts map[string]interface{}
 	switch v := options.(type) {
 	case string:
@@ -43,14 +42,28 @@ func NewRule(options interface{}) (*Rule, error) {
 		return nil, errors.New("invalid options shared_types")
 	}
 
+	if name, ok := opts["name"].(map[string]interface{}); ok {
+		rule.setName(name)
+	}
+
+	if priority, ok := opts["priority"].(map[string]interface{}); ok {
+		rule.setName(priority)
+	}
+
 	if conditions, ok := opts["conditions"].(map[string]interface{}); ok {
 		rule.setConditions(conditions)
 	}
-	if onSuccess, ok := opts["onSuccess"].(func()); ok {
-		rule.bus.Subscribe("success", onSuccess)
+	if onSuccess, ok := opts["onSuccess"].(func(result *RuleResult) interface{}); ok {
+		err := rule.bus.Subscribe("success", onSuccess)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if onFailure, ok := opts["onFailure"].(func()); ok {
-		rule.bus.Subscribe("failure", onFailure)
+	if onFailure, ok := opts["onFailure"].(func(result *RuleResult) interface{}); ok {
+		err := rule.bus.Subscribe("failure", onFailure)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if name, ok := opts["name"]; ok {
 		rule.setName(name)
@@ -198,6 +211,7 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 				if !result {
 					ctx.StopEarly = true
 					ctx.Message = "Stopping early due to 'all' condition failure"
+					ctx.Cancel()
 				}
 				return result, err
 			case "any":
@@ -206,6 +220,7 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 				if result {
 					ctx.StopEarly = true
 					ctx.Message = "Stopping early due to 'any' condition success"
+					ctx.Cancel()
 				}
 				return result, err
 			default:
@@ -240,9 +255,10 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 		for i, cond := range conditions {
 			go func(i int, cond *Condition) {
 				defer wg.Done()
+
 				select {
 				case <-ctx.Done():
-					// Context cancelled
+					Debug("Context cancelled in evaluateConditions goroutine")
 					return
 				default:
 					result, err := evaluateCondition(ctx, cond)
@@ -273,20 +289,8 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 			case res := <-resCh:
 				results[res.index] = res.result
 
-				// Early stopping based on operator and results
 				if ctx.StopEarly {
-					return false, nil
-				}
-
-				switch method(results) {
-				case true:
-					if ctx.StopEarly {
-						return true, nil
-					}
-				case false:
-					if !ctx.StopEarly {
-						return false, nil
-					}
+					return method(results), nil
 				}
 			}
 		}

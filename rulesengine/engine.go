@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"context"
@@ -9,34 +9,6 @@ import (
 
 	"github.com/asaskevich/EventBus"
 )
-
-const (
-	READY    = "READY"
-	RUNNING  = "RUNNING"
-	FINISHED = "FINISHED"
-)
-
-type Engine struct {
-	Rules                     []*Rule
-	AllowUndefinedFacts       bool
-	AllowUndefinedConditions  bool
-	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver
-	Operators                 map[string]Operator
-	Facts                     sync.Map
-	Conditions                sync.Map
-	Status                    string
-	prioritizedRules          [][]*Rule
-	bus                       EventBus.Bus
-	mu                        sync.Mutex
-}
-
-type RuleEngineOptions struct {
-	AllowUndefinedFacts       bool
-	AllowUndefinedConditions  bool
-	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver // TODO
-}
 
 func DefaultRuleEngineOptions() *RuleEngineOptions {
 	return &RuleEngineOptions{
@@ -157,6 +129,10 @@ func (e *Engine) RemoveRule(r interface{}) bool {
 		e.prioritizedRules = nil
 	}
 	return ruleRemoved
+}
+
+func (e *Engine) GetRules() []*Rule {
+	return e.Rules
 }
 
 // SetCondition sets a condition that can be referenced by the given name
@@ -314,7 +290,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 
 			select {
 			case <-ctx.Done():
-				// Context cancelled
+				Debug("Context cancelled in goroutine")
 				return
 			default:
 				ruleResult, err := rule.Evaluate(ctx, almanac)
@@ -325,7 +301,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 
 				Debug(fmt.Sprintf("engine::run ruleResult:%v", ruleResult.Result))
 				results <- ruleResult
-				Debug("Result sent to results channel")
+				Debug("Result sent to results channel in goroutine")
 			}
 		}(r)
 	}
@@ -345,6 +321,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 		if ruleResult.Result != nil && *ruleResult.Result {
 			err := almanac.AddEvent(ruleResult.Event, "success")
 			if err != nil {
+				Debug(fmt.Sprintf("Error adding success event: %v", err))
 				return err
 			}
 			e.bus.Publish("success", ruleResult.Event, almanac, ruleResult)
@@ -352,6 +329,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 		} else {
 			err := almanac.AddEvent(ruleResult.Event, "failure")
 			if err != nil {
+				Debug(fmt.Sprintf("Error adding failure event: %v", err))
 				return err
 			}
 			e.bus.Publish("failure", ruleResult.Event, almanac, ruleResult)
@@ -360,6 +338,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 
 	// Check for errors
 	for err := range errs {
+		Debug("Received error from errs channel")
 		return err
 	}
 
@@ -367,10 +346,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 }
 
 // Run runs the rules engine
-func (e *Engine) Run(ctx context.Context, runtimeFacts map[string]interface{},
-
-// runOptions map[string]interface{}
-) (map[string]interface{}, error) {
+func (e *Engine) Run(ctx context.Context, input interface{}) (map[string]interface{}, error) {
 	var err error
 	defer func() {
 		if r := recover(); r != nil {
@@ -386,26 +362,39 @@ func (e *Engine) Run(ctx context.Context, runtimeFacts map[string]interface{},
 		AllowUndefinedFacts: &e.AllowUndefinedFacts,
 	})
 
+	switch v := input.(type) {
+	case []byte:
+		err = parseAndAddFacts(v, almanacInstance)
+		if err != nil {
+			return nil, err
+		}
+	case map[string]interface{}:
+		for factId, value := range v {
+			var f *Fact
+			if factInstance, ok := value.(*Fact); ok {
+				f = factInstance
+			} else {
+				f, _ = NewFact(factId, value, nil)
+			}
+			almanacInstance.AddFact(f, nil, nil)
+			Debug(fmt.Sprintf("engine::run initialized runtime fact:%s with %v<%T>", f.ID, f.Value, f.Value))
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type")
+	}
+
 	e.Facts.Range(func(_, value interface{}) bool {
 		f := value.(*Fact)
 		almanacInstance.AddFact(f, nil, nil)
 		return true
 	})
 
-	for factId, value := range runtimeFacts {
-		var f *Fact
-		if factInstance, ok := value.(*Fact); ok {
-			f = factInstance
-		} else {
-			f, _ = NewFact(factId, value, nil)
-		}
-		almanacInstance.AddFact(f, nil, nil)
-		Debug(fmt.Sprintf("engine::run initialized runtime fact:%s with %v<%T>", f.ID, f.Value, f.Value))
-	}
-
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// Run Context
 	execCtx := &ExecutionContext{
 		Context: ctx,
+		Cancel:  cancel,
 	}
 
 	orderedSets := e.PrioritizeRules()

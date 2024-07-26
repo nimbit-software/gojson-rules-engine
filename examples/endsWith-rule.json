@@ -5,21 +5,27 @@
       {
         "priority": 10,
         "all": [
-
           {
             "fact": "user",
-            "operator": "endsWith",
-            "value": "oter",
-            "path": "$.lastName"
+            "path": "$.firstName",
+            "operator": "includes",
+            "value": "a"
           }
         ]
       }
     ]
   },
   "event": {
-    "type": "endsWith",
+    "type": "compare facts",
     "params": {
-      "message": "Ends with Sooter"
+      "firstName": {
+        "fact": "user",
+        "path": "$.firstName"
+      },
+      "lastName": {
+        "fact": "user",
+        "path": "$.lastName"
+      }
     }
   }
 }
