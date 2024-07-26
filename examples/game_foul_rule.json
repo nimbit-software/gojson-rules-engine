@@ -8,17 +8,14 @@
           {
             "fact": "gameDuration",
             "operator": "equal",
-            "value": 40
+            "value": 40,
+            "path": "$."
           },
           {
-            "fact": "personalFoulCount",
+            "fact": "",
             "operator": "greaterThanInclusive",
-            "value": 5
-          },
-          {
-            "fact": "name",
-            "operator": "endsWith",
-            "value": "Sooter"
+            "value": 5,
+            "path": "personalFoulCount"
           }
         ]
       },

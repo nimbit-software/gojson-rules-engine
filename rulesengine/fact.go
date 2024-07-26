@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"errors"
@@ -37,7 +37,7 @@ func NewFact(id string, valueOrMethod interface{}, options *FactOptions) (*Fact,
 		CacheKeyMethod: defaultCacheKeys,
 	}
 
-	if method, ok := valueOrMethod.(DynamicFactCallback); ok {
+	if method, ok := valueOrMethod.(func(params map[string]interface{}, almanac *Almanac) interface{}); ok {
 		fact.CalculationMethod = method
 		fact.Type = DYNAMIC
 	} else {

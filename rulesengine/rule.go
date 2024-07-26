@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import (
 	"encoding/json"
@@ -30,7 +30,6 @@ func NewRule(options interface{}) (*Rule, error) {
 		},
 		bus: EventBus.New(),
 	}
-
 	var opts map[string]interface{}
 	switch v := options.(type) {
 	case string:
@@ -43,14 +42,28 @@ func NewRule(options interface{}) (*Rule, error) {
 		return nil, errors.New("invalid options shared_types")
 	}
 
+	if name, ok := opts["name"].(map[string]interface{}); ok {
+		rule.setName(name)
+	}
+
+	if priority, ok := opts["priority"].(map[string]interface{}); ok {
+		rule.setName(priority)
+	}
+
 	if conditions, ok := opts["conditions"].(map[string]interface{}); ok {
 		rule.setConditions(conditions)
 	}
-	if onSuccess, ok := opts["onSuccess"].(func()); ok {
-		rule.bus.Subscribe("success", onSuccess)
+	if onSuccess, ok := opts["onSuccess"].(func(result *RuleResult) interface{}); ok {
+		err := rule.bus.Subscribe("success", onSuccess)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if onFailure, ok := opts["onFailure"].(func()); ok {
-		rule.bus.Subscribe("failure", onFailure)
+	if onFailure, ok := opts["onFailure"].(func(result *RuleResult) interface{}); ok {
+		err := rule.bus.Subscribe("failure", onFailure)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if name, ok := opts["name"]; ok {
 		rule.setName(name)
@@ -162,12 +175,12 @@ func (r *Rule) ToJSON(stringify bool) (interface{}, error) {
 }
 
 // Evaluate evaluates the rule
-func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
+func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, error) {
 	ruleResult := NewRuleResult(*r.Conditions, r.RuleEvent, r.Priority, r.Name)
 
 	var realize func(*Condition) (bool, error)
-	var evaluateCondition func(*Condition) (bool, error)
-	var prioritizeAndRun func([]*Condition, string) (bool, error)
+	var evaluateCondition func(ctx *ExecutionContext, cond *Condition) (bool, error)
+	var prioritizeAndRun func(ctx *ExecutionContext, cond []*Condition, operator string) (bool, error)
 
 	realize = func(conditionReference *Condition) (bool, error) {
 		cond, ok := r.Engine.Conditions.Load(conditionReference.Condition)
@@ -184,20 +197,34 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 		if err != nil {
 			return false, err
 		}
-		return evaluateCondition(conditionReference)
+		return evaluateCondition(ctx, conditionReference)
 	}
 
-	evaluateCondition = func(cond *Condition) (bool, error) {
+	evaluateCondition = func(ctx *ExecutionContext, cond *Condition) (bool, error) {
 		if cond.IsConditionReference() {
 			return realize(cond)
 		} else if cond.IsBooleanOperator() {
 			switch cond.Operator {
 			case "all":
-				return prioritizeAndRun(cond.All, "all")
+				// TODO IF ALL AND FALSE THEN FAIL EARLY
+				result, err := prioritizeAndRun(ctx, cond.All, "all")
+				if !result {
+					ctx.StopEarly = true
+					ctx.Message = "Stopping early due to 'all' condition failure"
+					ctx.Cancel()
+				}
+				return result, err
 			case "any":
-				return prioritizeAndRun(cond.Any, "any")
+				// TODO IF ANY AND TRUE THEN PASS EARLY
+				result, err := prioritizeAndRun(ctx, cond.Any, "any")
+				if result {
+					ctx.StopEarly = true
+					ctx.Message = "Stopping early due to 'any' condition success"
+					ctx.Cancel()
+				}
+				return result, err
 			default:
-				return prioritizeAndRun([]*Condition{cond.Not}, "not")
+				return prioritizeAndRun(ctx, []*Condition{cond.Not}, "not")
 			}
 		} else {
 			evaluationResult, err := cond.Evaluate(almanac, r.Engine.Operators)
@@ -208,10 +235,9 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 			cond.Result = evaluationResult.Result
 			return evaluationResult.Result, nil
 		}
-		return false, errors.New("invalid condition")
 	}
 
-	evaluateConditions := func(conditions []*Condition, method func([]bool) bool) (bool, error) {
+	evaluateConditions := func(ctx *ExecutionContext, conditions []*Condition, method func([]bool) bool) (bool, error) {
 		if len(conditions) == 0 {
 			return true, nil
 		}
@@ -229,15 +255,22 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 		for i, cond := range conditions {
 			go func(i int, cond *Condition) {
 				defer wg.Done()
-				result, err := evaluateCondition(cond)
-				if err != nil {
-					errs <- err
+
+				select {
+				case <-ctx.Done():
+					Debug("Context cancelled in evaluateConditions goroutine")
 					return
+				default:
+					result, err := evaluateCondition(ctx, cond)
+					if err != nil {
+						errs <- err
+						return
+					}
+					resCh <- struct {
+						index  int
+						result bool
+					}{index: i, result: result}
 				}
-				resCh <- struct {
-					index  int
-					result bool
-				}{index: i, result: result}
 			}(i, cond)
 		}
 
@@ -255,18 +288,22 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 				return false, err
 			case res := <-resCh:
 				results[res.index] = res.result
+
+				if ctx.StopEarly {
+					return method(results), nil
+				}
 			}
 		}
 
 		return method(results), nil
 	}
 
-	prioritizeAndRun = func(conditions []*Condition, operator string) (bool, error) {
+	prioritizeAndRun = func(ctx *ExecutionContext, conditions []*Condition, operator string) (bool, error) {
 		if len(conditions) == 0 {
 			return true, nil
 		}
 		if len(conditions) == 1 {
-			return evaluateCondition(conditions[0])
+			return evaluateCondition(ctx, conditions[0])
 		}
 
 		var method func([]bool) bool
@@ -300,7 +337,10 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 		// Prioritize conditions based on priority
 		orderedSets := r.prioritizeConditions(conditions)
 		for _, set := range orderedSets {
-			result, err := evaluateConditions(set, method)
+			if ctx.StopEarly {
+				return false, nil
+			}
+			result, err := evaluateConditions(ctx, set, method)
 			if err != nil {
 				return false, err
 			}
@@ -330,11 +370,11 @@ func (r *Rule) Evaluate(almanac *Almanac) (*RuleResult, error) {
 	var result bool
 	var err error
 	if ruleResult.Conditions.Any != nil {
-		result, err = prioritizeAndRun(ruleResult.Conditions.Any, "any")
+		result, err = prioritizeAndRun(ctx, ruleResult.Conditions.Any, "any")
 	} else if ruleResult.Conditions.All != nil {
-		result, err = prioritizeAndRun(ruleResult.Conditions.All, "all")
+		result, err = prioritizeAndRun(ctx, ruleResult.Conditions.All, "all")
 	} else if ruleResult.Conditions.Not != nil {
-		result, err = prioritizeAndRun([]*Condition{ruleResult.Conditions.Not}, "not")
+		result, err = prioritizeAndRun(ctx, []*Condition{ruleResult.Conditions.Not}, "not")
 	} else {
 		result, err = realize(r.Conditions)
 	}

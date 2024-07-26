@@ -1,4 +1,4 @@
-package src
+package rulesengine
 
 import "strings"
 
@@ -21,9 +21,17 @@ func DefaultOperators() []Operator {
 		return a == b
 	}, nil)
 	operators = append(operators, *equal)
+	equal, _ = NewOperator("eq", func(a, b interface{}) bool {
+		return a == b
+	}, nil)
+	operators = append(operators, *equal)
 
 	// NOT EQUALS
 	notEqual, _ := NewOperator("notEqual", func(a, b interface{}) bool {
+		return a != b
+	}, nil)
+	operators = append(operators, *notEqual)
+	notEqual, _ = NewOperator("ne", func(a, b interface{}) bool {
 		return a != b
 	}, nil)
 	operators = append(operators, *notEqual)
@@ -81,7 +89,7 @@ func DefaultOperators() []Operator {
 	operators = append(operators, *contains)
 
 	// DOES NOT CONTAIN OPERATOR
-	doesNotContain, _ := NewOperator("doesNotContain", func(a, b interface{}) bool {
+	notContains, _ := NewOperator("doesNotContain", func(a, b interface{}) bool {
 		aArray, ok := a.([]interface{})
 		if !ok {
 			return true
@@ -96,7 +104,7 @@ func DefaultOperators() []Operator {
 		_, ok := factValue.([]interface{})
 		return ok
 	})
-	operators = append(operators, *doesNotContain)
+	operators = append(operators, *notContains)
 
 	// LESS THAN OPERATOR
 	lessThan, _ := NewOperator("lessThan", func(a, b interface{}) bool {
@@ -107,6 +115,13 @@ func DefaultOperators() []Operator {
 	operators = append(operators, *lessThan)
 
 	lessThan, _ = NewOperator("<", func(a, b interface{}) bool {
+		aFloat, okA := a.(float64)
+		bFloat, okB := b.(float64)
+		return okA && okB && aFloat < bFloat
+	}, NumberValidator)
+	operators = append(operators, *lessThan)
+
+	lessThan, _ = NewOperator("lt", func(a, b interface{}) bool {
 		aFloat, okA := a.(float64)
 		bFloat, okB := b.(float64)
 		return okA && okB && aFloat < bFloat
@@ -128,6 +143,13 @@ func DefaultOperators() []Operator {
 	}, NumberValidator)
 	operators = append(operators, *lessThanInclusive)
 
+	lessThanInclusive, _ = NewOperator("lte", func(a, b interface{}) bool {
+		aFloat, okA := a.(float64)
+		bFloat, okB := b.(float64)
+		return okA && okB && aFloat <= bFloat
+	}, NumberValidator)
+	operators = append(operators, *lessThanInclusive)
+
 	// GREATER THAN OPERATOR
 	greaterThan, _ := NewOperator("greaterThan", func(a, b interface{}) bool {
 		aFloat, okA := a.(float64)
@@ -143,6 +165,12 @@ func DefaultOperators() []Operator {
 	}, NumberValidator)
 	operators = append(operators, *greaterThan)
 
+	greaterThan, _ = NewOperator("gt", func(a, b interface{}) bool {
+		aFloat, okA := a.(float64)
+		bFloat, okB := b.(float64)
+		return okA && okB && aFloat > bFloat
+	}, NumberValidator)
+	operators = append(operators, *greaterThan)
 	// GREATER THAN INCLUSIVE OPERATOR
 	greaterThanInclusive, _ := NewOperator("greaterThanInclusive", func(a, b interface{}) bool {
 		aFloat, okA := a.(float64)
@@ -152,6 +180,13 @@ func DefaultOperators() []Operator {
 	operators = append(operators, *greaterThanInclusive)
 
 	greaterThanInclusive, _ = NewOperator(">=", func(a, b interface{}) bool {
+		aFloat, okA := a.(float64)
+		bFloat, okB := b.(float64)
+		return okA && okB && aFloat >= bFloat
+	}, NumberValidator)
+	operators = append(operators, *greaterThanInclusive)
+
+	greaterThanInclusive, _ = NewOperator("gte", func(a, b interface{}) bool {
 		aFloat, okA := a.(float64)
 		bFloat, okB := b.(float64)
 		return okA && okB && aFloat >= bFloat
@@ -172,6 +207,13 @@ func DefaultOperators() []Operator {
 		return okA && okB && strings.HasSuffix(aString, bString)
 	}, nil)
 	operators = append(operators, *endsWith)
+
+	includes, _ := NewOperator("includes", func(a, b interface{}) bool {
+		aString, okA := a.(string)
+		bString, okB := b.(string)
+		return okA && okB && strings.Contains(aString, bString)
+	}, nil)
+	operators = append(operators, *includes)
 
 	return operators
 }

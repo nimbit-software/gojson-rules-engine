@@ -1,8 +1,9 @@
-package src
+package rulesengine
 
 import (
 	"errors"
 	"fmt"
+	"github.com/buger/jsonparser"
 	"github.com/oliveagle/jsonpath"
 	"sync"
 )
@@ -23,7 +24,7 @@ type Almanac struct {
 	allowUndefinedFacts bool
 	pathResolver        PathResolver
 	events              *map[string][]interface{} // TODO USE REAL TYPE
-	ruleResults         *[]RuleResult
+	ruleResults         *[]*RuleResult
 }
 
 type Options struct {
@@ -46,7 +47,7 @@ func NewAlmanac(options Options) *Almanac {
 		allowUndefinedFacts: allowUndefinedFacts,
 		pathResolver:        pathResolver,
 		events:              &map[string][]interface{}{"success": {}, "failure": {}},
-		ruleResults:         &[]RuleResult{},
+		ruleResults:         &[]*RuleResult{},
 	}
 }
 
@@ -79,11 +80,11 @@ func (a *Almanac) GetEvents(outcome string) *[]interface{} {
 
 // AddResult adds a rule result
 func (a *Almanac) AddResult(ruleResult *RuleResult) {
-	*a.ruleResults = append(*a.ruleResults, *ruleResult)
+	*a.ruleResults = append(*a.ruleResults, ruleResult)
 }
 
 // GetResults retrieves all rule results
-func (a *Almanac) GetResults() *[]RuleResult {
+func (a *Almanac) GetResults() *[]*RuleResult {
 	return a.ruleResults
 }
 
@@ -175,7 +176,10 @@ func (a *Almanac) FactValue(factId string, params map[string]interface{}, path s
 		if IsObjectLike(factValue) {
 			pathValue, err := a.pathResolver(factValue, path)
 			if err != nil {
-				return nil, err
+				if a.allowUndefinedFacts {
+					return nil, nil
+				}
+				return nil, &UndefinedFactError{Message: fmt.Sprintf("Undefined fact: %s", factId)}
 			}
 			Debug(fmt.Sprintf("condition::evaluate extracting object property %s, received: %v", path, pathValue))
 			return pathValue, nil
@@ -191,9 +195,116 @@ func (a *Almanac) GetValue(value interface{}) (interface{}, error) {
 		valMap, ok := value.(map[string]interface{})
 		if ok {
 			if factId, ok := valMap["fact"].(string); ok {
-				return a.FactValue(factId, valMap["params"].(map[string]interface{}), valMap["path"].(string))
+				// Extract params and path
+				params := map[string]interface{}{}
+				if p, ok := valMap["params"]; ok {
+					params = p.(map[string]interface{})
+				}
+				path := ""
+				if p, ok := valMap["path"]; ok {
+					path = p.(string)
+				}
+				return a.FactValue(factId, params, path)
 			}
 		}
 	}
 	return value, nil
+}
+
+// parseAndAddFacts parses the JSON input and adds facts to the Almanac
+func parseAndAddFacts(jsonInput []byte, almanac *Almanac) error {
+	var parseError error
+
+	parseError = jsonparser.ObjectEach(jsonInput, func(key []byte, value []byte, dataType jsonparser.ValueType, offset int) error {
+		keyStr := string(key)
+		switch dataType {
+		case jsonparser.String:
+			strValue, err := jsonparser.ParseString(value)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			fact, err := NewFact(keyStr, strValue, nil)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			almanac.AddFact(fact, nil, nil)
+		case jsonparser.Number:
+			numValue, err := jsonparser.ParseFloat(value)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			fact, err := NewFact(keyStr, numValue, nil)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			almanac.AddFact(fact, nil, nil)
+		case jsonparser.Boolean:
+			boolValue, err := jsonparser.ParseBoolean(value)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			fact, err := NewFact(keyStr, boolValue, nil)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			almanac.AddFact(fact, nil, nil)
+		case jsonparser.Object:
+			// If value is an object, parse recursively
+			objValue := make(map[string]interface{})
+			parseError = jsonparser.ObjectEach(value, func(subKey []byte, subValue []byte, subDataType jsonparser.ValueType, subOffset int) error {
+				subKeyStr := string(subKey)
+				switch subDataType {
+				case jsonparser.String:
+					strValue, err := jsonparser.ParseString(subValue)
+					if err != nil {
+						parseError = err
+						return err
+					}
+					objValue[subKeyStr] = strValue
+				case jsonparser.Number:
+					numValue, err := jsonparser.ParseFloat(subValue)
+					if err != nil {
+						parseError = err
+						return err
+					}
+					objValue[subKeyStr] = numValue
+				case jsonparser.Boolean:
+					boolValue, err := jsonparser.ParseBoolean(subValue)
+					if err != nil {
+						parseError = err
+						return err
+					}
+					objValue[subKeyStr] = boolValue
+				default:
+					parseError = errors.New("unsupported data type")
+					return parseError
+				}
+				return nil
+			})
+			if parseError != nil {
+				return parseError
+			}
+			fact, err := NewFact(keyStr, objValue, nil)
+			if err != nil {
+				parseError = err
+				return err
+			}
+			almanac.AddFact(fact, nil, nil)
+		default:
+			parseError = errors.New("unsupported data type")
+			return parseError
+		}
+		return nil
+	})
+	if parseError != nil {
+		return parseError
+	}
+
+	return parseError
 }

@@ -5,21 +5,27 @@
       {
         "priority": 10,
         "all": [
-
           {
             "fact": "user",
-            "operator": "endsWith",
-            "value": "Sooter",
-            "path": "$.lastName"
+            "path": "$.firstName",
+            "operator": "includes",
+            "value": "a"
           }
         ]
       }
     ]
   },
   "event": {
-    "type": "fouledOut",
+    "type": "compare facts",
     "params": {
-      "message": "Player has fouled out!"
+      "firstName": {
+        "fact": "user",
+        "path": "$.firstName"
+      },
+      "lastName": {
+        "fact": "user",
+        "path": "$.lastName"
+      }
     }
   }
 }
