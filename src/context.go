@@ -4,18 +4,21 @@ import (
 	"context"
 )
 
-type EvaluationContext struct {
+// ExecutionContext holds metadata and control flags for rule execution.
+type ExecutionContext struct {
 	context.Context
-	Errors []error // TODO CUSTOM ERROR TYPE
+	StopEarly bool
+	Message   string
+	Errors    []error
 }
 
-func NewEvaluationContext(ctx context.Context) *EvaluationContext {
-	return &EvaluationContext{
+func NewEvaluationContext(ctx context.Context) *ExecutionContext {
+	return &ExecutionContext{
 		Context: ctx,
 		Errors:  []error{},
 	}
 }
 
-func (c *EvaluationContext) AddError(err error) {
+func (c *ExecutionContext) AddError(err error) {
 	c.Errors = append(c.Errors, err)
 }

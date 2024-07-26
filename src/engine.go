@@ -1,6 +1,7 @@
 package src
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -30,38 +31,44 @@ type Engine struct {
 	mu                        sync.Mutex
 }
 
+type RuleEngineOptions struct {
+	AllowUndefinedFacts       bool
+	AllowUndefinedConditions  bool
+	ReplaceFactsInEventParams bool
+	PathResolver              PathResolver // TODO
+}
+
+func DefaultRuleEngineOptions() *RuleEngineOptions {
+	return &RuleEngineOptions{
+		AllowUndefinedFacts:       false,
+		AllowUndefinedConditions:  false,
+		ReplaceFactsInEventParams: false,
+		PathResolver:              nil,
+	}
+}
+
 // NewEngine creates a new Engine instance
-func NewEngine(rules []*Rule, options map[string]interface{}) *Engine {
-	engine := &Engine{
-		Rules:     []*Rule{},
-		Operators: make(map[string]Operator),
-		Status:    READY,
-		bus:       EventBus.New(),
+func NewEngine(rules []*Rule, options *RuleEngineOptions) *Engine {
+	if options == nil {
+		options = DefaultRuleEngineOptions()
 	}
 
-	// Handle options with defaults
-	if options != nil {
-		if v, ok := options["allowUndefinedFacts"].(bool); ok {
-			engine.AllowUndefinedFacts = v
-		}
-		if v, ok := options["allowUndefinedConditions"].(bool); ok {
-			engine.AllowUndefinedConditions = v
-		}
-		if v, ok := options["replaceFactsInEventParams"].(bool); ok {
-			engine.ReplaceFactsInEventParams = v
-		}
-		if v, ok := options["pathResolver"].(PathResolver); ok {
-			engine.PathResolver = v
-		}
-	} else {
-		engine.AllowUndefinedFacts = false
-		engine.AllowUndefinedConditions = false
-		engine.ReplaceFactsInEventParams = false
-		engine.PathResolver = nil
+	engine := &Engine{
+		Rules:                     []*Rule{},
+		Operators:                 make(map[string]Operator),
+		Status:                    READY,
+		bus:                       EventBus.New(),
+		AllowUndefinedConditions:  options.AllowUndefinedConditions,
+		AllowUndefinedFacts:       options.AllowUndefinedFacts,
+		ReplaceFactsInEventParams: options.ReplaceFactsInEventParams,
+		PathResolver:              nil, // TODO
 	}
 
 	for _, r := range rules {
-		engine.AddRule(r)
+		err := engine.AddRule(r)
+		if err != nil {
+			return nil
+		}
 	}
 	for _, o := range DefaultOperators() {
 		engine.AddOperator(o, nil)
@@ -72,9 +79,9 @@ func NewEngine(rules []*Rule, options map[string]interface{}) *Engine {
 // AddRule adds a rule definition to the engine
 func (e *Engine) AddRule(properties interface{}) error {
 	if properties == nil {
-		return errors.New("Engine: addRule() requires options")
+		return errors.New("engine: addRule() requires options")
 	}
-
+	// TODO PROCESS PATH TO USE buger/jsonparser
 	var r *Rule
 	switch v := properties.(type) {
 	case *Rule:
@@ -82,10 +89,10 @@ func (e *Engine) AddRule(properties interface{}) error {
 	default:
 		props := v.(map[string]interface{})
 		if _, ok := props["event"]; !ok {
-			return errors.New("Engine: addRule() argument requires 'event' property")
+			return errors.New("engine: addRule() argument requires 'event' property")
 		}
 		if _, ok := props["conditions"]; !ok {
-			return errors.New("Engine: addRule() argument requires 'conditions' property")
+			return errors.New("engine: addRule() argument requires 'conditions' property")
 		}
 		r, _ = NewRule(props)
 	}
@@ -108,11 +115,14 @@ func (e *Engine) UpdateRule(rule *Rule) error {
 
 	if ruleIndex > -1 {
 		e.Rules = append(e.Rules[:ruleIndex], e.Rules[ruleIndex+1:]...)
-		e.AddRule(rule)
+		err := e.AddRule(rule)
+		if err != nil {
+			return err
+		}
 		e.prioritizedRules = nil
 		return nil
 	}
-	return errors.New("Engine: updateRule() rule not found")
+	return errors.New("engine: updateRule() rule not found")
 }
 
 // RemoveRule removes a rule from the engine
@@ -133,7 +143,7 @@ func (e *Engine) RemoveRule(r interface{}) bool {
 			ruleRemoved = true
 		}
 	case string:
-		filteredRules := []*Rule{}
+		var filteredRules []*Rule
 		for _, r := range e.Rules {
 			if r.GetName() != v {
 				filteredRules = append(filteredRules, r)
@@ -152,10 +162,10 @@ func (e *Engine) RemoveRule(r interface{}) bool {
 // SetCondition sets a condition that can be referenced by the given name
 func (e *Engine) SetCondition(name string, conditions map[string]interface{}) error {
 	if name == "" {
-		return errors.New("Engine: setCondition() requires name")
+		return errors.New("engine: setCondition() requires name")
 	}
 	if conditions == nil {
-		return errors.New("Engine: setCondition() requires conditions")
+		return errors.New("engine: setCondition() requires conditions")
 	}
 	if _, ok := conditions["all"]; !ok {
 		if _, ok := conditions["any"]; !ok {
@@ -282,7 +292,7 @@ func (e *Engine) GetFact(factId string) *Fact {
 }
 
 // EvaluateRules runs an array of rules
-func (e *Engine) EvaluateRules(ruleArray []*Rule, almanac *Almanac) error {
+func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionContext) error {
 	// CHECK STATE OF ENGINE
 	if e.Status != RUNNING {
 		Debug(fmt.Sprintf("engine::run status:%s; skipping remaining rules", e.Status))
@@ -290,39 +300,60 @@ func (e *Engine) EvaluateRules(ruleArray []*Rule, almanac *Almanac) error {
 	}
 
 	var wg sync.WaitGroup
+	errs := make(chan error, len(rules))
+	results := make(chan *RuleResult, len(rules))
 
-	errs := make(chan error, len(ruleArray))
-	results := make(chan *RuleResult, len(ruleArray))
+	for _, r := range rules {
+		if ctx.StopEarly {
+			break
+		}
 
-	for _, r := range ruleArray {
 		wg.Add(1)
 		go func(rule *Rule) {
 			defer wg.Done()
 
-			ruleResult, err := rule.Evaluate(almanac)
-			if err != nil {
-				errs <- err
+			select {
+			case <-ctx.Done():
+				// Context cancelled
 				return
+			default:
+				ruleResult, err := rule.Evaluate(ctx, almanac)
+				if err != nil {
+					errs <- err
+					return
+				}
+
+				Debug(fmt.Sprintf("engine::run ruleResult:%v", ruleResult.Result))
+				results <- ruleResult
+				Debug("Result sent to results channel")
 			}
-			Debug(fmt.Sprintf("engine::run ruleResult:%v", ruleResult.Result))
-			results <- ruleResult
 		}(r)
 	}
 
+	// Close results and errors channels after all goroutines complete
 	go func() {
 		wg.Wait()
-		close(errs)
+		Debug("All goroutines completed")
 		close(results)
+		close(errs)
 	}()
 
+	// Collect results
 	for ruleResult := range results {
+		Debug("Received result from results channel")
 		almanac.AddResult(ruleResult)
 		if ruleResult.Result != nil && *ruleResult.Result {
-			almanac.AddEvent(ruleResult.Event, "success")
+			err := almanac.AddEvent(ruleResult.Event, "success")
+			if err != nil {
+				return err
+			}
 			e.bus.Publish("success", ruleResult.Event, almanac, ruleResult)
 			e.bus.Publish(ruleResult.Event.Type, ruleResult.Event.Params, almanac, ruleResult)
 		} else {
-			almanac.AddEvent(ruleResult.Event, "failure")
+			err := almanac.AddEvent(ruleResult.Event, "failure")
+			if err != nil {
+				return err
+			}
 			e.bus.Publish("failure", ruleResult.Event, almanac, ruleResult)
 		}
 	}
@@ -336,10 +367,17 @@ func (e *Engine) EvaluateRules(ruleArray []*Rule, almanac *Almanac) error {
 }
 
 // Run runs the rules engine
-func (e *Engine) Run(runtimeFacts map[string]interface{},
+func (e *Engine) Run(ctx context.Context, runtimeFacts map[string]interface{},
 
 // runOptions map[string]interface{}
 ) (map[string]interface{}, error) {
+	var err error
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("engine::run recovered from panic: %v", r)
+		}
+	}()
+
 	Debug("engine::run started")
 	e.Status = RUNNING
 
@@ -365,10 +403,18 @@ func (e *Engine) Run(runtimeFacts map[string]interface{},
 		Debug(fmt.Sprintf("engine::run initialized runtime fact:%s with %v<%T>", f.ID, f.Value, f.Value))
 	}
 
+	// Run Context
+	execCtx := &ExecutionContext{
+		Context: ctx,
+	}
+
 	orderedSets := e.PrioritizeRules()
 	for _, set := range orderedSets {
-		if err := e.EvaluateRules(set, almanacInstance); err != nil {
+		if err := e.EvaluateRules(set, almanacInstance, execCtx); err != nil {
 			return nil, err
+		}
+		if execCtx.StopEarly {
+			break
 		}
 	}
 
@@ -376,8 +422,8 @@ func (e *Engine) Run(runtimeFacts map[string]interface{},
 	Debug("engine::run completed")
 
 	ruleResults := almanacInstance.GetResults()
-	var results []RuleResult
-	var failureResults []RuleResult
+	var results []*RuleResult
+	var failureResults []*RuleResult
 
 	// Safely dereference ruleResults before iterating
 	if ruleResults != nil {
@@ -397,5 +443,5 @@ func (e *Engine) Run(runtimeFacts map[string]interface{},
 		"failureResults": failureResults,
 		"events":         almanacInstance.GetEvents("success"),
 		"failureEvents":  almanacInstance.GetEvents("failure"),
-	}, nil
+	}, err
 }

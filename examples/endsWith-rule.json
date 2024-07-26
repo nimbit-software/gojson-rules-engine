@@ -9,7 +9,7 @@
           {
             "fact": "user",
             "operator": "endsWith",
-            "value": "Sooter",
+            "value": "oter",
             "path": "$.lastName"
           }
         ]
@@ -17,9 +17,9 @@
     ]
   },
   "event": {
-    "type": "fouledOut",
+    "type": "endsWith",
     "params": {
-      "message": "Player has fouled out!"
+      "message": "Ends with Sooter"
     }
   }
 }

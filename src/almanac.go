@@ -23,7 +23,7 @@ type Almanac struct {
 	allowUndefinedFacts bool
 	pathResolver        PathResolver
 	events              *map[string][]interface{} // TODO USE REAL TYPE
-	ruleResults         *[]RuleResult
+	ruleResults         *[]*RuleResult
 }
 
 type Options struct {
@@ -46,7 +46,7 @@ func NewAlmanac(options Options) *Almanac {
 		allowUndefinedFacts: allowUndefinedFacts,
 		pathResolver:        pathResolver,
 		events:              &map[string][]interface{}{"success": {}, "failure": {}},
-		ruleResults:         &[]RuleResult{},
+		ruleResults:         &[]*RuleResult{},
 	}
 }
 
@@ -79,11 +79,11 @@ func (a *Almanac) GetEvents(outcome string) *[]interface{} {
 
 // AddResult adds a rule result
 func (a *Almanac) AddResult(ruleResult *RuleResult) {
-	*a.ruleResults = append(*a.ruleResults, *ruleResult)
+	*a.ruleResults = append(*a.ruleResults, ruleResult)
 }
 
 // GetResults retrieves all rule results
-func (a *Almanac) GetResults() *[]RuleResult {
+func (a *Almanac) GetResults() *[]*RuleResult {
 	return a.ruleResults
 }
 

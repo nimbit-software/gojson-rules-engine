@@ -27,7 +27,7 @@ type Condition struct {
 // NewCondition creates a new Condition instance
 func NewCondition(properties map[string]interface{}) (*Condition, error) {
 	if properties == nil {
-		return nil, errors.New("Condition: constructor options required")
+		return nil, errors.New("condition: constructor options required")
 	}
 
 	cond := &Condition{}
@@ -83,17 +83,22 @@ func NewCondition(properties map[string]interface{}) (*Condition, error) {
 		}
 	} else {
 		if _, ok := properties["fact"]; !ok {
-			return nil, errors.New(`Condition: constructor "fact" property required`)
+			return nil, errors.New(`condition: constructor "fact" property required`)
 		}
 		if _, ok := properties["operator"]; !ok {
-			return nil, errors.New(`Condition: constructor "operator" property required`)
+			return nil, errors.New(`condition: constructor "operator" property required`)
 		}
 		if _, ok := properties["value"]; !ok {
-			return nil, errors.New(`Condition: constructor "value" property required`)
+			return nil, errors.New(`condition: constructor "value" property required`)
 		}
 
 		cond.Fact = properties["fact"].(string)
-		cond.Path = properties["path"].(string)
+		// TODO SPLIT PATH OR USE
+		if path, ok := properties["path"]; ok {
+			cond.Path = path.(string)
+		} else {
+			cond.Path = ""
+		}
 		cond.Operator = properties["operator"].(string)
 		cond.Value = properties["value"]
 		if priority, ok := properties["priority"]; ok {
