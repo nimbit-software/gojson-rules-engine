@@ -73,7 +73,7 @@ func BenchmarkRuleEngineWithPath(b *testing.B) {
 	start := time.Now()
 
 	// Use goroutines to parallelize the benchmarking process
-	numGoroutines := 10
+	numGoroutines := 30
 	var wg sync.WaitGroup
 	chunkSize := b.N / numGoroutines
 

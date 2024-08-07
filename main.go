@@ -5,90 +5,84 @@ import (
 	"encoding/json"
 	"fmt"
 	rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
-	"os"
 )
 
 func main() {
-	//jsonBytes, err := os.ReadFile("examples/game_foul_rule.json")
-	jsonBytes, err := os.ReadFile("examples/endsWith-rule.json")
-	if err != nil {
-		panic(err)
-	}
 
-	var ruleMap map[string]interface{}
-	if err := json.Unmarshal(jsonBytes, &ruleMap); err != nil {
-		panic(err)
-	}
+	rule := []byte(`{
+  "conditions": {
+    "any": [
+      {
+        "all": [
+          {
+            "fact": "gameDuration",
+            "operator": "equal",
+            "value": 40
+          },
+          {
+            "fact": "personalFoulCount",
+            "operator": "greaterThanInclusive",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "all": [
+          {
+            "fact": "gameDuration",
+            "operator": "equal",
+            "value": 48
+          },
+          {
+            "fact": "personalFoulCount",
+            "operator": "greaterThanInclusive",
+            "value": 6
+          }
+        ]
+      }
+    ]
+  },
+  "event": {
+    "type": "fouledOut",
+    "params": {
+      "message": "Player has fouled out!"
+    }
+  }
+}`)
 
-	data := map[string]interface{}{
-		"personalFoulCount": 1,
-		"gameDuration":      40,
-		"user": map[string]interface{}{
-			"lastName":  "Sooter",
-			"firstName": "David",
-		},
-	}
-
-	dataByte := []byte(`{
-        "personalFoulCount": 6,
-        "gameDuration": 40,
-		"name": "John",
-        "user": {
-			"firstName": "David",
-            "lastName": "Sooter"
-        }
-    }`)
-
-	ruleMap["onSuccess"] = func(ruleResult *rulesEngine.RuleResult) {
-		fmt.Println("Rule succeeded")
-	}
-
-	ruleMap["onFailure"] = func(ruleResult *rulesEngine.RuleResult) {
-		fmt.Println("Rule succeeded")
-	}
-
+	// CONTEXT FOR EARLY-STOPPING
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	engine := rulesEngine.NewEngine(nil, &rulesEngine.RuleEngineOptions{
-		AllowUndefinedFacts:       true,
-		ReplaceFactsInEventParams: true,
-	})
+	// ENGINE OPTIONS
+	ep := &rulesEngine.RuleEngineOptions{
+		AllowUndefinedFacts: true,
+	}
 
-	engine.AddFact("fullName", func(params map[string]interface{}, almanac *rulesEngine.Almanac) interface{} {
-		almanac.GetValue("user.firstName")
-		return "bla"
-	}, nil)
+	var ruleMap map[string]interface{}
+	if err := json.Unmarshal(rule, &ruleMap); err != nil {
+		panic(err)
+	}
+
+	engine := rulesEngine.NewEngine(nil, ep)
 
 	engine.AddRule(ruleMap)
-	json, _ := engine.GetRules()[0].ToJSON(false)
-	rulesEngine.NewRule(json)
-	fmt.Printf("%+v\n", json)
 
-	res, err := engine.Run(ctx, dataByte)
-	printResults(res)
-	res, err = engine.Run(ctx, data)
+	facts := []byte(`{
+            "personalFoulCount": 6,
+            "gameDuration": 40,
+            "name": "John",
+            "user": {
+                "lastName": "Jones"
+            }
+        }`)
 
-	printResults(res)
-}
-
-func printResults(res map[string]interface{}) {
-	fmt.Println("Results:")
-	for _, result := range res["results"].([]*rulesEngine.RuleResult) {
-		fmt.Printf("%+v\n", result)
+	// THE RUN FUNCTION ACCEPTS BOTH A MAP AND A BYTE ARRAY
+	// - []byte (byte array offers slightly better performance) under the hood github.com/buger/jsonparser is used to parse it into the almanac
+	// - map[string]interface{}
+	res, err := engine.Run(ctx, facts)
+	if err != nil {
+		panic(err)
 	}
-
-	fmt.Println("Failure Results:")
-	for _, failureResult := range res["failureResults"].([]*rulesEngine.RuleResult) {
-		fmt.Printf("%+v\n", failureResult)
-	}
-
-	fmt.Println("Almanac:")
-	fmt.Printf("%+v\n", res["almanac"])
-
-	fmt.Println("Events:")
-	fmt.Printf("%+v\n", res["events"])
-
-	fmt.Println("Failure Events:")
-	fmt.Printf("%+v\n", res["failureEvents"])
+	fmt.Println(res)
 }

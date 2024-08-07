@@ -10,4 +10,9 @@ require (
 	github.com/oliveagle/jsonpath v0.0.0-20180606110733-2e52cf6e6852
 )
 
-require golang.org/x/text v0.16.0 // indirect
+require (
+	github.com/yuin/goldmark v1.4.13 // indirect
+	golang.org/x/mod v0.19.0 // indirect
+	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/tools v0.23.0 // indirect
+)
