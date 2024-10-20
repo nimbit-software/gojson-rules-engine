@@ -42,12 +42,16 @@ func NewRule(options interface{}) (*Rule, error) {
 		return nil, errors.New("invalid options shared_types")
 	}
 
-	if name, ok := opts["name"].(map[string]interface{}); ok {
+	if name, ok := opts["name"]; ok {
 		rule.setName(name)
 	}
 
-	if priority, ok := opts["priority"].(map[string]interface{}); ok {
-		rule.setName(priority)
+	if priority, err := ParsePriority(opts); err == nil {
+		if err := rule.setPriority(priority); err != nil {
+			return nil, err
+		}
+	} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
+		return nil, err
 	}
 
 	if conditions, ok := opts["conditions"].(map[string]interface{}); ok {
@@ -65,12 +69,6 @@ func NewRule(options interface{}) (*Rule, error) {
 			return nil, err
 		}
 	}
-	if name, ok := opts["name"]; ok {
-		rule.setName(name)
-	}
-	if priority, ok := opts["priority"].(float64); ok {
-		rule.setPriority(int(priority))
-	}
 	if event, ok := opts["event"].(map[string]interface{}); ok {
 		rule.setEvent(event)
 	}
@@ -79,11 +77,12 @@ func NewRule(options interface{}) (*Rule, error) {
 }
 
 // SetPriority sets the priority of the rule
-func (r *Rule) setPriority(priority int) {
+func (r *Rule) setPriority(priority int) error {
 	if priority <= 0 {
-		panic("Priority must be greater than zero")
+		return NewInvalidPriorityValueError()
 	}
 	r.Priority = priority
+	return nil
 }
 
 // SetName sets the name of the rule

@@ -24,6 +24,10 @@ type Condition struct {
 	Not        *Condition
 }
 
+func (c *Condition) SetPriority(priority int) {
+	c.Priority = priority
+}
+
 // NewCondition creates a new Condition instance
 func NewCondition(properties map[string]interface{}) (*Condition, error) {
 	if properties == nil {
@@ -44,12 +48,10 @@ func NewCondition(properties map[string]interface{}) (*Condition, error) {
 
 		cond.Operator = booleanOperator
 
-		if priority, ok := properties["priority"]; ok {
-			if p, ok := priority.(float64); ok {
-				cond.Priority = int(p)
-			} else {
-				cond.Priority = 1
-			}
+		if priority, err := ParsePriority(properties); err == nil {
+			cond.Priority = priority
+		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
+			return nil, err
 		} else {
 			cond.Priority = 1
 		}
@@ -100,8 +102,10 @@ func NewCondition(properties map[string]interface{}) (*Condition, error) {
 		}
 		cond.Operator = properties["operator"].(string)
 		cond.Value = properties["value"]
-		if priority, ok := properties["priority"]; ok {
-			cond.Priority = int(priority.(float64))
+		if priority, err := ParsePriority(properties); err == nil {
+			cond.Priority = priority
+		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
+			return nil, err
 		}
 	}
 
