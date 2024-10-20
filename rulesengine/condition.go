@@ -9,7 +9,7 @@ import (
 
 // Condition represents a condition in the rule engine
 type Condition struct {
-	Priority   int
+	Priority   *int
 	Name       string
 	Operator   string
 	Value      interface{}
@@ -24,99 +24,60 @@ type Condition struct {
 	Not        *Condition
 }
 
-func (c *Condition) SetPriority(priority int) {
-	c.Priority = priority
+// Validate checks if the Condition is valid based on the business rules
+func (c *Condition) Validate() error {
+	// Validate priority (must be greater than 0 if set)
+	if c.Priority != nil && *c.Priority <= 0 {
+		return errors.New("priority must be greater than zero")
+	}
+
+	// Validate that if any of Value, Fact, or Operator are set, all three must be set
+	if c.Value != nil || c.Operator != "" || c.Fact != "" {
+		if c.Value == nil || c.Operator == "" || c.Fact == "" {
+			return errors.New("if value, operator, or fact are set, all three must be provided")
+		}
+	}
+
+	// If Any, All, or Not are set, Value, Operator, and Fact must not be set
+	if (len(c.Any) > 0 || len(c.All) > 0 || c.Not != nil) && (c.Value != nil || c.Operator != "" || c.Fact != "") {
+		return errors.New("value, operator, and fact must not be set if any, all, or not conditions are provided")
+	}
+
+	// Path should only be set if Value is set
+	if c.Path != "" && c.Value == nil {
+		return errors.New("path can only be set if value is provided")
+	}
+
+	return nil
 }
 
-// NewCondition creates a new Condition instance
-func NewCondition(properties map[string]interface{}) (*Condition, error) {
-	if properties == nil {
-		return nil, errors.New("condition: constructor options required")
+// UnmarshalJSON is a custom JSON unmarshaller for the Condition struct with validation
+func (c *Condition) UnmarshalJSON(data []byte) error {
+	// Create a temporary struct to hold the incoming data
+	type Alias Condition // Alias to avoid infinite recursion in UnmarshalJSON
+	temp := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(c),
 	}
 
-	cond := &Condition{}
-	booleanOperator := booleanOperator(properties)
-
-	if booleanOperator != "" {
-		subConditions, subConditionsIsArray := properties[booleanOperator].([]interface{})
-		if booleanOperator != "not" && !subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" must be an array`, booleanOperator)
-		}
-		if booleanOperator == "not" && subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" cannot be an array`, booleanOperator)
-		}
-
-		cond.Operator = booleanOperator
-
-		if priority, err := ParsePriority(properties); err == nil {
-			cond.Priority = priority
-		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
-			return nil, err
-		} else {
-			cond.Priority = 1
-		}
-
-		if subConditionsIsArray {
-			for _, sc := range subConditions {
-				subCondMap, ok := sc.(map[string]interface{})
-				if !ok {
-					return nil, errors.New("invalid sub-condition format")
-				}
-				subCond, err := NewCondition(subCondMap)
-				if err != nil {
-					return nil, err
-				}
-				if booleanOperator == "all" {
-					cond.All = append(cond.All, subCond)
-				} else {
-					cond.Any = append(cond.Any, subCond)
-				}
-			}
-		} else {
-			subCondMap, ok := properties[booleanOperator].(map[string]interface{})
-			if !ok {
-				return nil, errors.New("invalid sub-condition format")
-			}
-			subCond, err := NewCondition(subCondMap)
-			if err != nil {
-				return nil, err
-			}
-			cond.Not = subCond
-		}
-	} else {
-		if _, ok := properties["fact"]; !ok {
-			return nil, errors.New(`condition: constructor "fact" property required`)
-		}
-		if _, ok := properties["operator"]; !ok {
-			return nil, errors.New(`condition: constructor "operator" property required`)
-		}
-		if _, ok := properties["value"]; !ok {
-			return nil, errors.New(`condition: constructor "value" property required`)
-		}
-
-		cond.Fact = properties["fact"].(string)
-		if path, ok := properties["path"]; ok {
-			cond.Path = path.(string)
-		} else {
-			cond.Path = ""
-		}
-		cond.Operator = properties["operator"].(string)
-		cond.Value = properties["value"]
-		if priority, err := ParsePriority(properties); err == nil {
-			cond.Priority = priority
-		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
-			return nil, err
-		}
+	// Unmarshal the JSON data into the temp struct
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
 	}
 
-	return cond, nil
+	// Validate the condition after unmarshaling
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ToJSON converts the condition to a JSON-friendly structure
 func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 	props := map[string]interface{}{}
-	if c.Priority != 0 {
-		props["priority"] = c.Priority
+	if c.Priority != nil {
+		props["priority"] = *c.Priority
 	}
 	if c.Name != "" {
 		props["name"] = c.Name
@@ -219,12 +180,12 @@ func (c *Condition) Evaluate(almanac *Almanac, operatorMap map[string]Operator) 
 }
 
 // booleanOperator returns the boolean operator for the condition
-func booleanOperator(condition map[string]interface{}) string {
-	if _, ok := condition["any"]; ok {
+func booleanOperator(condition *Condition) string {
+	if len(condition.Any) > 0 {
 		return "any"
-	} else if _, ok := condition["all"]; ok {
+	} else if len(condition.All) > 0 {
 		return "all"
-	} else if _, ok := condition["not"]; ok {
+	} else if condition.Not != nil {
 		return "not"
 	}
 	return ""
@@ -232,6 +193,9 @@ func booleanOperator(condition map[string]interface{}) string {
 
 // booleanOperator returns the condition's boolean operator
 func (c *Condition) booleanOperator() string {
+	if c == nil {
+		return ""
+	}
 	if c.All != nil {
 		return "all"
 	}

@@ -14,114 +14,81 @@ import (
 type Rule struct {
 	Priority   int
 	Name       string
-	Conditions *Condition
+	Conditions Condition
 	RuleEvent  Event
 	Engine     *Engine
 	bus        EventBus.Bus
 	mu         sync.Mutex
 }
 
-// NewRule creates a new Rule instance
-func NewRule(options interface{}) (*Rule, error) {
-	rule := &Rule{
-		Priority: 1,
-		RuleEvent: Event{
-			Type: "unknown",
-		},
-		bus: EventBus.New(),
-	}
-	var opts map[string]interface{}
-	switch v := options.(type) {
-	case string:
-		if err := json.Unmarshal([]byte(v), &opts); err != nil {
-			return nil, err
-		}
-	case map[string]interface{}:
-		opts = v
-	default:
-		return nil, errors.New("invalid options shared_types")
-	}
-
-	if name, ok := opts["name"]; ok {
-		rule.setName(name)
-	}
-
-	if priority, err := ParsePriority(opts); err == nil {
-		if err := rule.setPriority(priority); err != nil {
-			return nil, err
-		}
-	} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
-		return nil, err
-	}
-
-	if conditions, ok := opts["conditions"].(map[string]interface{}); ok {
-		rule.setConditions(conditions)
-	}
-	if onSuccess, ok := opts["onSuccess"].(func(result *RuleResult) interface{}); ok {
-		err := rule.bus.Subscribe("success", onSuccess)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if onFailure, ok := opts["onFailure"].(func(result *RuleResult) interface{}); ok {
-		err := rule.bus.Subscribe("failure", onFailure)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if event, ok := opts["event"].(map[string]interface{}); ok {
-		rule.setEvent(event)
-	}
-
-	return rule, nil
-}
-
-// SetPriority sets the priority of the rule
 func (r *Rule) setPriority(priority int) error {
 	if priority <= 0 {
-		return NewInvalidPriorityValueError()
+		return errors.New("priority must be greater than zero")
 	}
 	r.Priority = priority
 	return nil
 }
 
-// SetName sets the name of the rule
-func (r *Rule) setName(name interface{}) {
-	if name == nil {
-		panic("Rule 'name' must be defined")
+type EventConfig struct {
+	Type   string
+	Params *map[string]interface{}
+}
+
+// NewRule creates a new Rule instance
+func NewRule(config *RuleConfig) (*Rule, error) {
+	// Validate conditions
+	if err := config.Conditions.Validate(); err != nil {
+		return nil, err
 	}
-	r.Name = fmt.Sprintf("%v", name)
-}
+	// Initialize rule with default values
+	rule := &Rule{
+		Name:       config.Name,
+		Priority:   1,
+		Conditions: config.Conditions,
+		RuleEvent: Event{
+			Type: "unknown",
+		},
+		bus: EventBus.New(),
+	}
 
-func (r *Rule) GetName() string {
-	return r.Name
-}
-
-// SetConditions sets the conditions to run when evaluating the rule
-func (r *Rule) setConditions(conditions map[string]interface{}) {
-	if _, ok := conditions["all"]; !ok {
-		if _, ok := conditions["any"]; !ok {
-			if _, ok := conditions["not"]; !ok {
-				if _, ok := conditions["condition"]; !ok {
-					panic(`"conditions" root must contain a single instance of "all", "any", "not", or "condition"`)
-				}
-			}
+	// RULE PRIORITY: Set the priority if provided
+	if config.Priority != nil {
+		if err := rule.setPriority(*config.Priority); err != nil {
+			return nil, err
 		}
 	}
-	r.Conditions, _ = NewCondition(conditions)
+
+	// Subscribe to onSuccess callback if it exists
+	if config.OnSuccess != nil {
+		if err := rule.bus.Subscribe("success", config.OnSuccess); err != nil {
+			return nil, err
+		}
+	}
+
+	// Subscribe to onFailure callback if it exists
+	if config.OnFailure != nil {
+		if err := rule.bus.Subscribe("failure", config.OnFailure); err != nil {
+			return nil, err
+		}
+	}
+
+	// Set the event if the type is provided
+	if config.Event.Type != "" {
+		rule.setEvent(config.Event)
+	} else {
+		return nil, errors.New("invalid event config Type must be provided")
+	}
+
+	return rule, nil
 }
 
 // SetEvent sets the event to emit when the conditions evaluate truthy
-func (r *Rule) setEvent(event map[string]interface{}) {
-	eventType, ok := event["type"].(string)
-	if !ok {
-		panic(`Rule: setEvent() requires event object with "event" property`)
-	}
+func (r *Rule) setEvent(event EventConfig) {
 	r.RuleEvent = Event{
-		Type: eventType,
+		Type: event.Type,
 	}
-	if params, ok := event["params"].(map[string]interface{}); ok {
-		r.RuleEvent.Params = params
+	if event.Params != nil {
+		r.RuleEvent.Params = *event.Params
 	}
 }
 
@@ -137,7 +104,7 @@ func (r *Rule) GetPriority() int {
 
 // GetConditions returns the event object
 func (r *Rule) GetConditions() *Condition {
-	return r.Conditions
+	return &r.Conditions
 }
 
 // GetEngine returns the engine object
@@ -175,7 +142,7 @@ func (r *Rule) ToJSON(stringify bool) (interface{}, error) {
 
 // Evaluate evaluates the rule
 func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, error) {
-	ruleResult := NewRuleResult(*r.Conditions, r.RuleEvent, r.Priority, r.Name)
+	ruleResult := NewRuleResult(r.Conditions, r.RuleEvent, r.Priority, r.Name)
 
 	var realize func(*Condition) (bool, error)
 	var evaluateCondition func(ctx *ExecutionContext, cond *Condition) (bool, error)
@@ -201,31 +168,57 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 
 	evaluateCondition = func(ctx *ExecutionContext, cond *Condition) (bool, error) {
 		if cond.IsConditionReference() {
+			// If this is a condition reference, realize it before evaluation
 			return realize(cond)
-		} else if cond.IsBooleanOperator() {
-			switch cond.Operator {
-			case "all":
-				// TODO IF ALL AND FALSE THEN FAIL EARLY
-				result, err := prioritizeAndRun(ctx, cond.All, "all")
-				if !result {
-					ctx.StopEarly = true
-					ctx.Message = "Stopping early due to 'all' condition failure"
-					ctx.Cancel()
-				}
+		}
+
+		var result bool
+		var err error
+
+		// Evaluate 'all' block if it exists
+		if cond.All != nil && len(cond.All) > 0 {
+			result, err = prioritizeAndRun(ctx, cond.All, "all")
+			if err != nil || !result {
+				// Early exit if 'all' block fails
+				ctx.StopEarly = true
+				ctx.Message = "Stopping early due to 'all' condition failure"
+				ctx.Cancel()
 				return result, err
-			case "any":
-				// TODO IF ANY AND TRUE THEN PASS EARLY
-				result, err := prioritizeAndRun(ctx, cond.Any, "any")
-				if result {
-					ctx.StopEarly = true
-					ctx.Message = "Stopping early due to 'any' condition success"
-					ctx.Cancel()
-				}
-				return result, err
-			default:
-				return prioritizeAndRun(ctx, []*Condition{cond.Not}, "not")
 			}
-		} else {
+		}
+
+		// Evaluate 'any' block if it exists
+		if cond.Any != nil && len(cond.Any) > 0 {
+			result, err = prioritizeAndRun(ctx, cond.Any, "any")
+			if err != nil {
+				return false, err
+			}
+			if result {
+				// Early exit if 'any' block succeeds
+				ctx.StopEarly = true
+				ctx.Message = "Stopping early due to 'any' condition success"
+				ctx.Cancel()
+				return result, nil
+			}
+		}
+
+		// Evaluate 'not' block if it exists
+		if cond.Not != nil {
+			result, err = prioritizeAndRun(ctx, []*Condition{cond.Not}, "not")
+			if err != nil {
+				return false, err
+			}
+			if !result {
+				// If 'not' block is false, return true (because it's negation)
+				return true, nil
+			} else {
+				// If 'not' block is true, return false
+				return false, nil
+			}
+		}
+
+		// Base case: If there's no 'any', 'all', or 'not', it's a simple condition
+		if !cond.IsBooleanOperator() {
 			evaluationResult, err := cond.Evaluate(almanac, r.Engine.Operators)
 			if err != nil {
 				return false, err
@@ -234,6 +227,9 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 			cond.Result = evaluationResult.Result
 			return evaluationResult.Result, nil
 		}
+
+		// Default to false if none of the above cases match
+		return result, err
 	}
 
 	evaluateConditions := func(ctx *ExecutionContext, conditions []*Condition, method func([]bool) bool) (bool, error) {
@@ -368,17 +364,35 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 
 	var result bool
 	var err error
-	if ruleResult.Conditions.Any != nil {
-		result, err = prioritizeAndRun(ctx, ruleResult.Conditions.Any, "any")
-	} else if ruleResult.Conditions.All != nil {
-		result, err = prioritizeAndRun(ctx, ruleResult.Conditions.All, "all")
-	} else if ruleResult.Conditions.Not != nil {
-		result, err = prioritizeAndRun(ctx, []*Condition{ruleResult.Conditions.Not}, "not")
-	} else {
-		result, err = realize(r.Conditions)
+
+	conditions := map[string][]*Condition{}
+
+	if ruleResult.Conditions.Any != nil && len(ruleResult.Conditions.Any) > 0 {
+		conditions["any"] = ruleResult.Conditions.Any
 	}
-	if err != nil {
-		return nil, err
+
+	if ruleResult.Conditions.All != nil && len(ruleResult.Conditions.All) > 0 {
+		conditions["all"] = ruleResult.Conditions.All
+	}
+
+	if ruleResult.Conditions.Not != nil {
+		conditions["not"] = []*Condition{ruleResult.Conditions.Not} // Wrap `Not` in a slice
+	}
+
+	// If no conditions are provided, realize the default conditions
+	if ruleResult.Conditions.All == nil && ruleResult.Conditions.Any == nil && ruleResult.Conditions.Not == nil {
+		result, err = realize(&r.Conditions)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Iterate over the conditions and execute prioritizeAndRun if the condition is present
+		for operator, condition := range conditions {
+			result, err = prioritizeAndRun(ctx, condition, operator)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return processResult(result)
@@ -387,14 +401,19 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 func (r *Rule) prioritizeConditions(conditions []*Condition) [][]*Condition {
 	factSets := make(map[int][]*Condition)
 	for _, cond := range conditions {
+		if cond.Priority == nil {
+			zero := 0
+			cond.Priority = &zero
+		}
 		priority := cond.Priority
-		if priority == 0 {
+		if *priority == 0 {
 			f, _ := r.Engine.Facts.Load(cond.Fact)
 			if f != nil {
-				priority = f.(*Fact).Priority
+				factPriority := f.(*Fact).Priority
+				priority = &factPriority
 			}
 		}
-		factSets[priority] = append(factSets[priority], cond)
+		factSets[*priority] = append(factSets[*priority], cond)
 	}
 
 	var keys []int

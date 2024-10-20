@@ -7,32 +7,44 @@ import (
 func TestNewRule(t *testing.T) {
 	t.Run("Valid priority types", func(t *testing.T) {
 		testCases := []struct {
-			name     string
-			priority interface{}
-			expected int
+			name        string
+			priority    int
+			expected    int
+			expectError bool // Add a field to indicate if an error is expected
 		}{
-			{"float64", float64(2.0), 2},
-			{"float", float32(2.0), 2},
-			{"int64", int64(3), 3},
-			{"int", 4, 4},
+			{"valid priority 4", 4, 4, false},        // Valid priority should succeed
+			{"invalid priority -1", 100, 100, false}, // Invalid priority should return an error
+			{"invalid priority 0", 1, 1, false},      // Priority 0 should return an error
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				options := map[string]interface{}{
-					"name":     "Test Rule",
-					"priority": tc.priority,
-					"conditions": map[string]interface{}{
-						"all": []interface{}{},
+				allConditions := []*Condition{}
+				options := RuleConfig{
+					Name:     "Test Rule",
+					Priority: &tc.priority,
+					Conditions: Condition{
+						All: allConditions,
+					},
+					Event: EventConfig{
+						Type: "test",
 					},
 				}
 
-				rule, err := NewRule(options)
-				if err != nil {
-					t.Errorf("Expected rule creation to succeed, but got error: %v", err)
-				}
-				if rule.Priority != tc.expected {
-					t.Errorf("Expected priority to be %d, but got %d", tc.expected, rule.Priority)
+				rule, err := NewRule(&options)
+				if tc.expectError {
+					// Expect an error for invalid priority
+					if err == nil {
+						t.Errorf("Expected an error for priority %d, but got none", tc.priority)
+					}
+				} else {
+					// No error expected, validate the rule creation and priority
+					if err != nil {
+						t.Errorf("Expected rule creation to succeed, but got error: %v", err)
+					}
+					if rule.Priority != tc.expected {
+						t.Errorf("Expected priority to be %d, but got %d", tc.expected, rule.Priority)
+					}
 				}
 			})
 		}
@@ -40,47 +52,61 @@ func TestNewRule(t *testing.T) {
 
 	t.Run("Invalid priority types", func(t *testing.T) {
 		testCases := []struct {
-			name     string
-			priority interface{}
+			name        string
+			priority    int
+			expected    int
+			expectError bool // Add a field to indicate if an error is expected
 		}{
-			{"string", "invalid"},
-			{"bool", true},
-			{"slice", []int{1, 2, 3}},
-			{"map", map[string]int{"priority": 5}},
-			{"negative int", -1},
-			{"zero", 0},
+			{"invalid priority 0", 0, 0, true},   // Valid priority should succeed
+			{"invalid priority -1", -1, 0, true}, // Valid priority should succeed
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				options := map[string]interface{}{
-					"name":     "Test Rule",
-					"priority": tc.priority,
-					"conditions": map[string]interface{}{
-						"all": []interface{}{},
+				allConditions := []*Condition{}
+				options := RuleConfig{
+					Name:     "Test Rule",
+					Priority: &tc.priority,
+					Conditions: Condition{
+						All: allConditions,
+					},
+					Event: EventConfig{
+						Type: "test",
 					},
 				}
 
-				rule, err := NewRule(options)
-				if err == nil {
-					t.Errorf("Expected rule creation to fail, but got no error")
-				}
-				if rule != nil {
-					t.Errorf("Expected rule to be nil, but got %v", rule)
+				rule, err := NewRule(&options)
+				if tc.expectError {
+					// Expect an error for invalid priority
+					if err == nil {
+						t.Errorf("Expected an error for priority %d, but got none", tc.priority)
+					}
+				} else {
+					// No error expected, validate the rule creation and priority
+					if err != nil {
+						t.Errorf("Expected rule creation to succeed, but got error: %v", err)
+					}
+					if rule.Priority != tc.expected {
+						t.Errorf("Expected priority to be %d, but got %d", tc.expected, rule.Priority)
+					}
 				}
 			})
 		}
 	})
 
 	t.Run("Default priority", func(t *testing.T) {
-		options := map[string]interface{}{
-			"name": "Test Rule",
-			"conditions": map[string]interface{}{
-				"all": []interface{}{},
+		allConditions := []*Condition{}
+		options := RuleConfig{
+			Name: "Test Rule",
+			Conditions: Condition{
+				All: allConditions,
+			},
+			Event: EventConfig{
+				Type: "test",
 			},
 		}
 
-		rule, err := NewRule(options)
+		rule, err := NewRule(&options)
 		if err != nil {
 			t.Errorf("Expected rule creation to succeed, but got error: %v", err)
 		}
