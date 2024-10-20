@@ -25,83 +25,59 @@ type Condition struct {
 }
 
 // NewCondition creates a new Condition instance
-func NewCondition(properties map[string]interface{}) (*Condition, error) {
-	if properties == nil {
-		return nil, errors.New("condition: constructor options required")
+func NewCondition(input Condition) (*Condition, error) {
+	cond := &Condition{
+		Operator: input.Operator,
+		Fact:     input.Fact,
+		Path:     input.Path,
+		Value:    input.Value,
+		Priority: input.Priority,
 	}
 
-	cond := &Condition{}
-	booleanOperator := booleanOperator(properties)
+	if cond.Operator == "" {
+		return nil, errors.New("condition: constructor 'operator' property required")
+	}
 
-	if booleanOperator != "" {
-		subConditions, subConditionsIsArray := properties[booleanOperator].([]interface{})
-		if booleanOperator != "not" && !subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" must be an array`, booleanOperator)
+	// Handle boolean operators: "all", "any", and "not"
+	switch cond.Operator {
+	case "all":
+		if len(input.All) == 0 {
+			return nil, errors.New(`"all" must be an array of conditions`)
 		}
-		if booleanOperator == "not" && subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" cannot be an array`, booleanOperator)
-		}
-
-		cond.Operator = booleanOperator
-
-		if priority, ok := properties["priority"]; ok {
-			if p, ok := priority.(float64); ok {
-				cond.Priority = int(p)
-			} else {
-				cond.Priority = 1
-			}
-		} else {
-			cond.Priority = 1
-		}
-
-		if subConditionsIsArray {
-			for _, sc := range subConditions {
-				subCondMap, ok := sc.(map[string]interface{})
-				if !ok {
-					return nil, errors.New("invalid sub-condition format")
-				}
-				subCond, err := NewCondition(subCondMap)
-				if err != nil {
-					return nil, err
-				}
-				if booleanOperator == "all" {
-					cond.All = append(cond.All, subCond)
-				} else {
-					cond.Any = append(cond.Any, subCond)
-				}
-			}
-		} else {
-			subCondMap, ok := properties[booleanOperator].(map[string]interface{})
-			if !ok {
-				return nil, errors.New("invalid sub-condition format")
-			}
-			subCond, err := NewCondition(subCondMap)
+		for _, subCondition := range input.All {
+			newSubCondition, err := NewCondition(*subCondition)
 			if err != nil {
 				return nil, err
 			}
-			cond.Not = subCond
+			cond.All = append(cond.All, newSubCondition)
 		}
-	} else {
-		if _, ok := properties["fact"]; !ok {
-			return nil, errors.New(`condition: constructor "fact" property required`)
+	case "any":
+		if len(input.Any) == 0 {
+			return nil, errors.New(`"any" must be an array of conditions`)
 		}
-		if _, ok := properties["operator"]; !ok {
-			return nil, errors.New(`condition: constructor "operator" property required`)
+		for _, subCondition := range input.Any {
+			newSubCondition, err := NewCondition(*subCondition)
+			if err != nil {
+				return nil, err
+			}
+			cond.Any = append(cond.Any, newSubCondition)
 		}
-		if _, ok := properties["value"]; !ok {
-			return nil, errors.New(`condition: constructor "value" property required`)
+	case "not":
+		if input.Not == nil {
+			return nil, errors.New(`"not" cannot be an array and must have a single sub-condition`)
 		}
-
-		cond.Fact = properties["fact"].(string)
-		if path, ok := properties["path"]; ok {
-			cond.Path = path.(string)
-		} else {
-			cond.Path = ""
+		newSubCondition, err := NewCondition(*input.Not)
+		if err != nil {
+			return nil, err
 		}
-		cond.Operator = properties["operator"].(string)
-		cond.Value = properties["value"]
-		if priority, ok := properties["priority"]; ok {
-			cond.Priority = int(priority.(float64))
+		cond.Not = newSubCondition
+	default:
+		// Non-boolean condition must have 'fact', 'operator', and 'value'
+		if cond.Fact == "" {
+			return nil, errors.New(`condition: constructor 'fact' property required`)
+		}
+		if cond.Value == nil {
+			return nil, errors.New(`condition: constructor 'value' property required`)
 		}
 	}
 
@@ -215,12 +191,12 @@ func (c *Condition) Evaluate(almanac *Almanac, operatorMap map[string]Operator) 
 }
 
 // booleanOperator returns the boolean operator for the condition
-func booleanOperator(condition map[string]interface{}) string {
-	if _, ok := condition["any"]; ok {
+func booleanOperator(condition *Condition) string {
+	if len(condition.Any) > 0 {
 		return "any"
-	} else if _, ok := condition["all"]; ok {
+	} else if len(condition.All) > 0 {
 		return "all"
-	} else if _, ok := condition["not"]; ok {
+	} else if condition.Not != nil {
 		return "not"
 	}
 	return ""
@@ -228,6 +204,9 @@ func booleanOperator(condition map[string]interface{}) string {
 
 // booleanOperator returns the condition's boolean operator
 func (c *Condition) booleanOperator() string {
+	if c == nil {
+		return ""
+	}
 	if c.All != nil {
 		return "all"
 	}

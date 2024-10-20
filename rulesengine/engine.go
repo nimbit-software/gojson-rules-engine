@@ -48,38 +48,44 @@ func NewEngine(rules []*Rule, options *RuleEngineOptions) *Engine {
 	return engine
 }
 
-// AddRule adds a rule definition to the engine
-func (e *Engine) AddRule(properties interface{}) error {
-	if properties == nil {
-		return errors.New("engine: addRule() requires options")
-	}
-	// TODO PROCESS PATH TO USE buger/jsonparser
-	var r *Rule
-	switch v := properties.(type) {
-	case *Rule:
-		r = v
-	default:
-		props := v.(map[string]interface{})
-		if _, ok := props["event"]; !ok {
-			return errors.New("engine: addRule() argument requires 'event' property")
-		}
-		if _, ok := props["conditions"]; !ok {
-			return errors.New("engine: addRule() argument requires 'conditions' property")
-		}
-		r, _ = NewRule(props)
+func (e *Engine) AddRule(rule *Rule) error {
+	if rule == nil {
+		return errors.New("engine: rule is required")
 	}
 
+	rule.SetEngine(e)
+	e.Rules = append(e.Rules, rule)
+	e.prioritizedRules = nil
+	return nil
+}
+
+func (e *Engine) AddRuleFromMap(rp *RuleConfig) error {
+	if rp == nil {
+		return errors.New("engine: AddRuleFromMap invalid configuration")
+	}
+
+	r, _ := NewRule(rp)
 	r.SetEngine(e)
 	e.Rules = append(e.Rules, r)
 	e.prioritizedRules = nil
 	return nil
 }
 
+func (e *Engine) AddRules(rules []*Rule) error {
+	for _, r := range rules {
+		err := e.AddRule(r)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpdateRule updates a rule in the engine
-func (e *Engine) UpdateRule(rule *Rule) error {
+func (e *Engine) UpdateRule(r *Rule) error {
 	ruleIndex := -1
 	for i, ruleInEngine := range e.Rules {
-		if ruleInEngine.GetName() == rule.GetName() {
+		if ruleInEngine.GetName() == r.GetName() {
 			ruleIndex = i
 			break
 		}
@@ -87,7 +93,7 @@ func (e *Engine) UpdateRule(rule *Rule) error {
 
 	if ruleIndex > -1 {
 		e.Rules = append(e.Rules[:ruleIndex], e.Rules[ruleIndex+1:]...)
-		err := e.AddRule(rule)
+		err := e.AddRule(r)
 		if err != nil {
 			return err
 		}
@@ -97,38 +103,37 @@ func (e *Engine) UpdateRule(rule *Rule) error {
 	return errors.New("engine: updateRule() rule not found")
 }
 
-// RemoveRule removes a rule from the engine
-func (e *Engine) RemoveRule(r interface{}) bool {
-	ruleRemoved := false
+func (e *Engine) RemoveRule(rule *Rule) bool {
+	index := -1
+	for i, r := range e.Rules {
+		if r == rule {
+			index = i
+			break
+		}
+	}
 
-	switch v := r.(type) {
-	case *Rule:
-		index := -1
-		for i, r := range e.Rules {
-			if r == v {
-				index = i
-				break
-			}
+	if index > -1 {
+		e.Rules = append(e.Rules[:index], e.Rules[index+1:]...)
+		e.prioritizedRules = nil // reset prioritized rules
+		return true
+	}
+	return false
+}
+
+func (e *Engine) RemoveRuleByName(name string) bool {
+	var filteredRules []*Rule
+	for _, r := range e.Rules {
+		if r.GetName() != name {
+			filteredRules = append(filteredRules, r)
 		}
-		if index > -1 {
-			e.Rules = append(e.Rules[:index], e.Rules[index+1:]...)
-			ruleRemoved = true
-		}
-	case string:
-		var filteredRules []*Rule
-		for _, r := range e.Rules {
-			if r.GetName() != v {
-				filteredRules = append(filteredRules, r)
-			}
-		}
-		ruleRemoved = len(filteredRules) != len(e.Rules)
+	}
+
+	if len(filteredRules) != len(e.Rules) {
 		e.Rules = filteredRules
+		e.prioritizedRules = nil // reset prioritized rules
+		return true
 	}
-
-	if ruleRemoved {
-		e.prioritizedRules = nil
-	}
-	return ruleRemoved
+	return false
 }
 
 func (e *Engine) GetRules() []*Rule {
@@ -136,26 +141,26 @@ func (e *Engine) GetRules() []*Rule {
 }
 
 // SetCondition sets a condition that can be referenced by the given name
-func (e *Engine) SetCondition(name string, conditions map[string]interface{}) error {
-	if name == "" {
-		return errors.New("engine: setCondition() requires name")
-	}
-	if conditions == nil {
-		return errors.New("engine: setCondition() requires conditions")
-	}
-	if _, ok := conditions["all"]; !ok {
-		if _, ok := conditions["any"]; !ok {
-			if _, ok := conditions["not"]; !ok {
-				if _, ok := conditions["condition"]; !ok {
-					return errors.New(`"conditions" root must contain a single instance of "all", "any", "not", or "condition"`)
-				}
-			}
-		}
-	}
-	cond, _ := NewCondition(conditions)
-	e.Conditions.Store(name, cond)
-	return nil
-}
+//func (e *Engine) SetCondition(name string, conditions map[string]interface{}) error {
+//	if name == "" {
+//		return errors.New("engine: setCondition() requires name")
+//	}
+//	if conditions == nil {
+//		return errors.New("engine: setCondition() requires conditions")
+//	}
+//	if _, ok := conditions["all"]; !ok {
+//		if _, ok := conditions["any"]; !ok {
+//			if _, ok := conditions["not"]; !ok {
+//				if _, ok := conditions["condition"]; !ok {
+//					return errors.New(`"conditions" root must contain a single instance of "all", "any", "not", or "condition"`)
+//				}
+//			}
+//		}
+//	}
+//	cond, _ := NewCondition(conditions)
+//	e.Conditions.Store(name, cond)
+//	return nil
+//}
 
 // RemoveCondition removes a condition that has previously been added to this engine
 func (e *Engine) RemoveCondition(name string) bool {

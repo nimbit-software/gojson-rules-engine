@@ -10,6 +10,27 @@
             "path": "$.firstName",
             "operator": "includes",
             "value": "a"
+          },
+          {
+            "fact": "",
+            "operator": "greaterThanInclusive",
+            "value": 5,
+            "path": "personalFoulCount"
+          }
+        ]
+      },
+      {
+        "priority": 4,
+        "all": [
+          {
+            "fact": "gameDuration",
+            "operator": "equal",
+            "value": 48
+          },
+          {
+            "fact": "personalFoulCount",
+            "operator": "greaterThanInclusive",
+            "value": 6
           }
         ]
       }

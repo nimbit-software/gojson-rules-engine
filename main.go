@@ -9,7 +9,7 @@ import (
 
 func main() {
 
-	rule := []byte(`{
+	ruleRaw := []byte(`{
   "conditions": {
     "any": [
       {
@@ -23,20 +23,6 @@ func main() {
             "fact": "personalFoulCount",
             "operator": "greaterThanInclusive",
             "value": 5
-          }
-        ]
-      },
-      {
-        "all": [
-          {
-            "fact": "gameDuration",
-            "operator": "equal",
-            "value": 48
-          },
-          {
-            "fact": "personalFoulCount",
-            "operator": "greaterThanInclusive",
-            "value": 6
           }
         ]
       }
@@ -59,17 +45,18 @@ func main() {
 		AllowUndefinedFacts: true,
 	}
 
-	var ruleMap map[string]interface{}
-	if err := json.Unmarshal(rule, &ruleMap); err != nil {
+	var ruleConfig rulesEngine.RuleConfig
+	if err := json.Unmarshal(ruleRaw, &ruleConfig); err != nil {
 		panic(err)
 	}
 
 	engine := rulesEngine.NewEngine(nil, ep)
 
-	engine.AddRule(ruleMap)
+	rule, err := rulesEngine.NewRule(&ruleConfig)
+	err = engine.AddRule(rule)
 
 	facts := []byte(`{
-            "personalFoulCount": 6,
+            "personalFoulCount": 7,
             "gameDuration": 40,
             "name": "John",
             "user": {

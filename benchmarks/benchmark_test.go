@@ -77,8 +77,8 @@ func BenchmarkRuleEngineBasic(b *testing.B) {
 		b.Fatalf("Failed to read rule file: %v", err)
 	}
 
-	var ruleMap map[string]interface{}
-	if err := json.Unmarshal(jsonBytes, &ruleMap); err != nil {
+	var ruleConfig rulesEngine.RuleConfig
+	if err := json.Unmarshal(jsonBytes, &ruleConfig); err != nil {
 		b.Fatalf("Failed to unmarshal rule JSON: %v", err)
 	}
 
@@ -89,7 +89,8 @@ func BenchmarkRuleEngineBasic(b *testing.B) {
 	engine := rulesEngine.NewEngine(nil, &rulesEngine.RuleEngineOptions{
 		AllowUndefinedFacts: true,
 	})
-	engine.AddRule(ruleMap)
+	rule, err := rulesEngine.NewRule(&ruleConfig)
+	err = engine.AddRule(rule)
 
 	b.ResetTimer()
 	start := time.Now()
