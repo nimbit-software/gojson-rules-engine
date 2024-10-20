@@ -9,11 +9,12 @@ func TestCondition(t *testing.T) {
 
 	// Test a valid RuleConfig with a valid Condition
 	t.Run("TestValidRuleConfig", func(t *testing.T) {
+		priority := 1
 		ruleConfig := RuleConfig{
 			Name:     "Test Rule",
 			Priority: nil, // optional priority
 			Conditions: Condition{
-				Priority: 1,
+				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
 				Value:    "someValue",
@@ -28,10 +29,11 @@ func TestCondition(t *testing.T) {
 
 	// Test that RuleConfig returns an error when Condition's priority is invalid
 	t.Run("TestRuleConfigInvalidPriority", func(t *testing.T) {
+		priority := 0
 		ruleConfig := RuleConfig{
 			Name: "Test Rule",
 			Conditions: Condition{
-				Priority: 0, // invalid priority
+				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
 				Value:    "someValue",
@@ -47,6 +49,7 @@ func TestCondition(t *testing.T) {
 
 	// Test that RuleConfig returns an error when Value, Fact, or Operator are missing
 	t.Run(" TestRuleConfigMissingValueFactOperator", func(t *testing.T) {
+		priority := 1
 		testCases := []struct {
 			name       string
 			conditions Condition
@@ -55,7 +58,7 @@ func TestCondition(t *testing.T) {
 			{
 				name: "Missing Fact",
 				conditions: Condition{
-					Priority: 1,
+					Priority: &priority,
 					Operator: "equal",
 					Value:    "someValue",
 					Fact:     "", // missing fact
@@ -65,7 +68,7 @@ func TestCondition(t *testing.T) {
 			{
 				name: "Missing Operator",
 				conditions: Condition{
-					Priority: 1,
+					Priority: &priority,
 					Operator: "",
 					Value:    "someValue",
 					Fact:     "factName", // missing operator
@@ -75,7 +78,7 @@ func TestCondition(t *testing.T) {
 			{
 				name: "Missing Value",
 				conditions: Condition{
-					Priority: 1,
+					Priority: &priority,
 					Operator: "equal",
 					Value:    nil, // missing value
 					Fact:     "factName",
@@ -102,14 +105,15 @@ func TestCondition(t *testing.T) {
 
 	// Test mutual exclusion of Any, All, and Not with Value, Fact, and Operator
 	t.Run("TestRuleConfigMutualExclusion", func(t *testing.T) {
+		priority := 1
 		ruleConfig := RuleConfig{
 			Name: "Test Rule",
 			Conditions: Condition{
-				Priority: 1,
+				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
 				Value:    "someValue",
-				All:      []*Condition{{Priority: 1}}, // All is set, but Value, Fact, Operator are also set
+				All:      []*Condition{{Priority: &priority}}, // All is set, but Value, Fact, Operator are also set
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
@@ -122,10 +126,11 @@ func TestCondition(t *testing.T) {
 
 	// Test that Path can only be set if Value is provided
 	t.Run("TestRuleConfigPathRequiresValue", func(t *testing.T) {
+		priority := 1
 		ruleConfig := RuleConfig{
 			Name: "Test Rule",
 			Conditions: Condition{
-				Priority: 1,
+				Priority: &priority,
 				Path:     "somePath", // Path is set, but Value is nil
 			},
 			Event: EventConfig{Type: "TestEvent"},
@@ -158,7 +163,7 @@ func TestCondition(t *testing.T) {
 			t.Errorf("Expected successful unmarshal, but got error: %v", err)
 		}
 
-		if ruleConfig.Conditions.Priority != 1 {
+		if *ruleConfig.Conditions.Priority != 1 {
 			t.Errorf("Expected priority to be 1, got %d", ruleConfig.Conditions.Priority)
 		}
 		if ruleConfig.Conditions.Operator != "equal" {
