@@ -85,7 +85,7 @@ func (e *Engine) AddRules(rules []*Rule) error {
 func (e *Engine) UpdateRule(r *Rule) error {
 	ruleIndex := -1
 	for i, ruleInEngine := range e.Rules {
-		if ruleInEngine.GetName() == r.GetName() {
+		if ruleInEngine.Name == r.Name {
 			ruleIndex = i
 			break
 		}
@@ -123,7 +123,7 @@ func (e *Engine) RemoveRule(rule *Rule) bool {
 func (e *Engine) RemoveRuleByName(name string) bool {
 	var filteredRules []*Rule
 	for _, r := range e.Rules {
-		if r.GetName() != name {
+		if r.Name != name {
 			filteredRules = append(filteredRules, r)
 		}
 	}

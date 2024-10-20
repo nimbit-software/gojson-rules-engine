@@ -1,6 +1,8 @@
 package rulesengine
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/asaskevich/EventBus"
 	"sync"
 )
@@ -93,4 +95,36 @@ type RuleEngineOptions struct {
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
 	PathResolver              PathResolver
+}
+
+type RuleConfig struct {
+	Name       string      `json:"name"`
+	Priority   *int        `json:"priority"`
+	Conditions Condition   `json:"conditions"`
+	Event      EventConfig `json:"event"`
+	OnSuccess  func(result *RuleResult) interface{}
+	OnFailure  func(result *RuleResult) interface{}
+}
+
+// UnmarshalJSON is a custom JSON unmarshaller for RuleConfig to ensure proper unmarshaling of Condition
+func (r *RuleConfig) UnmarshalJSON(data []byte) error {
+	// Define an alias to avoid recursion
+	type Alias RuleConfig
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	}
+
+	// Unmarshal the data into the auxiliary struct
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Now manually unmarshal and validate the Conditions field
+	if err := json.Unmarshal(data, &r.Conditions); err != nil {
+		return fmt.Errorf("failed to unmarshal conditions: %v", err)
+	}
+
+	return nil
 }

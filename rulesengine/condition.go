@@ -9,7 +9,7 @@ import (
 
 // Condition represents a condition in the rule engine
 type Condition struct {
-	Priority   int
+	Priority   *int
 	Name       string
 	Operator   string
 	Value      interface{}
@@ -24,71 +24,60 @@ type Condition struct {
 	Not        *Condition
 }
 
-// NewCondition creates a new Condition instance
-func NewCondition(input Condition) (*Condition, error) {
-	cond := &Condition{
-		Operator: input.Operator,
-		Fact:     input.Fact,
-		Path:     input.Path,
-		Value:    input.Value,
-		Priority: input.Priority,
+// Validate checks if the Condition is valid based on the business rules
+func (c *Condition) Validate() error {
+	// Validate priority (must be greater than 0 if set)
+	if c.Priority != nil && *c.Priority <= 0 {
+		return errors.New("priority must be greater than zero")
 	}
 
-	if cond.Operator == "" {
-		return nil, errors.New("condition: constructor 'operator' property required")
-	}
-
-	// Handle boolean operators: "all", "any", and "not"
-	switch cond.Operator {
-	case "all":
-		if len(input.All) == 0 {
-			return nil, errors.New(`"all" must be an array of conditions`)
-		}
-		for _, subCondition := range input.All {
-			newSubCondition, err := NewCondition(*subCondition)
-			if err != nil {
-				return nil, err
-			}
-			cond.All = append(cond.All, newSubCondition)
-		}
-	case "any":
-		if len(input.Any) == 0 {
-			return nil, errors.New(`"any" must be an array of conditions`)
-		}
-		for _, subCondition := range input.Any {
-			newSubCondition, err := NewCondition(*subCondition)
-			if err != nil {
-				return nil, err
-			}
-			cond.Any = append(cond.Any, newSubCondition)
-		}
-	case "not":
-		if input.Not == nil {
-			return nil, errors.New(`"not" cannot be an array and must have a single sub-condition`)
-		}
-		newSubCondition, err := NewCondition(*input.Not)
-		if err != nil {
-			return nil, err
-		}
-		cond.Not = newSubCondition
-	default:
-		// Non-boolean condition must have 'fact', 'operator', and 'value'
-		if cond.Fact == "" {
-			return nil, errors.New(`condition: constructor 'fact' property required`)
-		}
-		if cond.Value == nil {
-			return nil, errors.New(`condition: constructor 'value' property required`)
+	// Validate that if any of Value, Fact, or Operator are set, all three must be set
+	if c.Value != nil || c.Operator != "" || c.Fact != "" {
+		if c.Value == nil || c.Operator == "" || c.Fact == "" {
+			return errors.New("if value, operator, or fact are set, all three must be provided")
 		}
 	}
 
-	return cond, nil
+	// If Any, All, or Not are set, Value, Operator, and Fact must not be set
+	if (len(c.Any) > 0 || len(c.All) > 0 || c.Not != nil) && (c.Value != nil || c.Operator != "" || c.Fact != "") {
+		return errors.New("value, operator, and fact must not be set if any, all, or not conditions are provided")
+	}
+
+	// Path should only be set if Value is set
+	if c.Path != "" && c.Value == nil {
+		return errors.New("path can only be set if value is provided")
+	}
+
+	return nil
+}
+
+// UnmarshalJSON is a custom JSON unmarshaller for the Condition struct with validation
+func (c *Condition) UnmarshalJSON(data []byte) error {
+	// Create a temporary struct to hold the incoming data
+	type Alias Condition // Alias to avoid infinite recursion in UnmarshalJSON
+	temp := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	// Unmarshal the JSON data into the temp struct
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// Validate the condition after unmarshaling
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ToJSON converts the condition to a JSON-friendly structure
 func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 	props := map[string]interface{}{}
-	if c.Priority != 0 {
-		props["priority"] = c.Priority
+	if c.Priority != nil {
+		props["priority"] = *c.Priority
 	}
 	if c.Name != "" {
 		props["name"] = c.Name

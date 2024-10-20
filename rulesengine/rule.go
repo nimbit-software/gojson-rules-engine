@@ -21,22 +21,26 @@ type Rule struct {
 	mu         sync.Mutex
 }
 
+func (r *Rule) setPriority(priority int) error {
+	if priority <= 0 {
+		return errors.New("priority must be greater than zero")
+	}
+	r.Priority = priority
+	return nil
+}
+
 type EventConfig struct {
 	Type   string
 	Params *map[string]interface{}
 }
 
-type RuleConfig struct {
-	Name       string      `json:"name"`
-	Priority   *int        `json:"priority"`
-	Conditions Condition   `json:"conditions"`
-	Event      EventConfig `json:"event"`
-	OnSuccess  func(result *RuleResult) interface{}
-	OnFailure  func(result *RuleResult) interface{}
-}
-
 // NewRule creates a new Rule instance
 func NewRule(config *RuleConfig) (*Rule, error) {
+	// Validate conditions
+	if err := config.Conditions.Validate(); err != nil {
+		return nil, err
+	}
+	// Initialize rule with default values
 	rule := &Rule{
 		Name:       config.Name,
 		Priority:   1,
@@ -46,23 +50,24 @@ func NewRule(config *RuleConfig) (*Rule, error) {
 		},
 		bus: EventBus.New(),
 	}
-	// RULE PRIORITY
-	if config.Priority != nil {
-		rule.setName(config.Priority)
-	}
 
-	// Subscribe the onSuccess callback if it exists
-	if config.OnSuccess != nil {
-		err := rule.bus.Subscribe("success", config.OnSuccess)
-		if err != nil {
+	// RULE PRIORITY: Set the priority if provided
+	if config.Priority != nil {
+		if err := rule.setPriority(*config.Priority); err != nil {
 			return nil, err
 		}
 	}
 
-	// Subscribe the onFailure callback if it exists
+	// Subscribe to onSuccess callback if it exists
+	if config.OnSuccess != nil {
+		if err := rule.bus.Subscribe("success", config.OnSuccess); err != nil {
+			return nil, err
+		}
+	}
+
+	// Subscribe to onFailure callback if it exists
 	if config.OnFailure != nil {
-		err := rule.bus.Subscribe("failure", config.OnFailure)
-		if err != nil {
+		if err := rule.bus.Subscribe("failure", config.OnFailure); err != nil {
 			return nil, err
 		}
 	}
@@ -71,45 +76,11 @@ func NewRule(config *RuleConfig) (*Rule, error) {
 	if config.Event.Type != "" {
 		rule.setEvent(config.Event)
 	} else {
-		return nil, errors.New("event type is required")
+		return nil, errors.New("invalid event config Type must be provided")
 	}
 
 	return rule, nil
 }
-
-// SetPriority sets the priority of the rule
-func (r *Rule) setPriority(priority int) {
-	if priority <= 0 {
-		panic("Priority must be greater than zero")
-	}
-	r.Priority = priority
-}
-
-// SetName sets the name of the rule
-func (r *Rule) setName(name interface{}) {
-	if name == nil {
-		panic("Rule 'name' must be defined")
-	}
-	r.Name = fmt.Sprintf("%v", name)
-}
-
-func (r *Rule) GetName() string {
-	return r.Name
-}
-
-//// SetConditions sets the conditions to run when evaluating the rule
-//func (r *Rule) setConditions(conditions map[string]interface{}) {
-//	if _, ok := conditions["all"]; !ok {
-//		if _, ok := conditions["any"]; !ok {
-//			if _, ok := conditions["not"]; !ok {
-//				if _, ok := conditions["condition"]; !ok {
-//					panic(`"conditions" root must contain a single instance of "all", "any", "not", or "condition"`)
-//				}
-//			}
-//		}
-//	}
-//	r.Conditions, _ = NewCondition(conditions)
-//}
 
 // SetEvent sets the event to emit when the conditions evaluate truthy
 func (r *Rule) setEvent(event EventConfig) {
@@ -430,14 +401,19 @@ func (r *Rule) Evaluate(ctx *ExecutionContext, almanac *Almanac) (*RuleResult, e
 func (r *Rule) prioritizeConditions(conditions []*Condition) [][]*Condition {
 	factSets := make(map[int][]*Condition)
 	for _, cond := range conditions {
+		if cond.Priority == nil {
+			zero := 0
+			cond.Priority = &zero
+		}
 		priority := cond.Priority
-		if priority == 0 {
+		if *priority == 0 {
 			f, _ := r.Engine.Facts.Load(cond.Fact)
 			if f != nil {
-				priority = f.(*Fact).Priority
+				factPriority := f.(*Fact).Priority
+				priority = &factPriority
 			}
 		}
-		factSets[priority] = append(factSets[priority], cond)
+		factSets[*priority] = append(factSets[*priority], cond)
 	}
 
 	var keys []int
