@@ -4,6 +4,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+)
+
+var (
+	debugMode     bool
+	debugModeOnce sync.Once
 )
 
 // Debug logs the message if the DEBUG environment variable contains "json-rules-engine"
@@ -19,12 +25,12 @@ func Debug(message string) {
 	}
 }
 
-// isDebugMode checks if the DEBUG environment variable contains "json-rules-engine"
 func isDebugMode() bool {
-	debugEnv, debugEnvExists := os.LookupEnv("DEBUG")
-	if debugEnvExists && strings.Contains(debugEnv, "json-rules-engine") {
-		return true
-	}
-
-	return false
+	debugModeOnce.Do(func() {
+		debugEnv, debugEnvExists := os.LookupEnv("DEBUG")
+		if debugEnvExists && strings.Contains(debugEnv, "json-rules-engine") {
+			debugMode = true
+		}
+	})
+	return debugMode
 }

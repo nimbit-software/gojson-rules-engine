@@ -10,7 +10,15 @@ func IsObjectLike(value interface{}) bool {
 	return value != nil && reflect.ValueOf(value).Kind() == reflect.Map
 }
 
-func DeepCopy(src, dst interface{}) error {
+func DeepCloneCondition(src, dst *Condition) error {
+	bytes, err := json.Marshal(src)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(bytes, dst)
+}
+
+func DeepCloneEvent(src, dst *Event) error {
 	bytes, err := json.Marshal(src)
 	if err != nil {
 		return err
@@ -44,4 +52,12 @@ func ParsePriority(properties map[string]interface{}) (int, *InvalidRuleError) {
 	}
 
 	return result, err
+}
+
+func MapToByteArray(data map[string]interface{}) ([]byte, error) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	return jsonData, nil
 }

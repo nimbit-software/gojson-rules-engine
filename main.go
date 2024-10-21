@@ -22,17 +22,27 @@ func main() {
           },
           {
 			"priority": 11,
-            "fact": "personalFoulCount",
-            "operator": "greaterThanInclusive",
-            "value": 5
+            "fact": "use.lastName",
+            "operator": "=",
+            "value": "Jones"
           }
         ]
       }
-    ]
+    ],
+	"all": [
+		{
+			"fact": "user.lastName",
+			"operator": "includes",
+			"value": "Jo"
+		}
+	]
   },
   "event": {
     "type": "fouledOut",
     "params": {
+      "firstName": {
+        "fact": "user.lastName"
+      },
       "message": "Player has fouled out!"
     }
   }
@@ -44,7 +54,9 @@ func main() {
 
 	// ENGINE OPTIONS
 	ep := &rulesEngine.RuleEngineOptions{
-		AllowUndefinedFacts: true,
+		AllowUndefinedFacts:       true,
+		ReplaceFactsInEventParams: true,
+		AllowUndefinedConditions:  true,
 	}
 
 	var ruleConfig rulesEngine.RuleConfig
@@ -62,7 +74,8 @@ func main() {
             "gameDuration": 40,
             "name": "John",
             "user": {
-                "lastName": "Jones"
+                "lastName": "Jones",
+				"gameDuration": 40
             }
         }`)
 

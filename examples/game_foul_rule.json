@@ -8,14 +8,12 @@
           {
             "fact": "gameDuration",
             "operator": "equal",
-            "value": 40,
-            "path": "$."
+            "value": 40
           },
           {
-            "fact": "",
+            "fact": "personalFoulCount",
             "operator": "greaterThanInclusive",
-            "value": 5,
-            "path": "personalFoulCount"
+            "value": 5
           }
         ]
       },
@@ -39,6 +37,9 @@
   "event": {
     "type": "fouledOut",
     "params": {
+      "firstName": {
+        "fact": "user.firstName"
+      },
       "message": "Player has fouled out!"
     }
   }

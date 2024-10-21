@@ -4,20 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"reflect"
 )
 
-// Condition represents a condition in the rule engine
+type GjsonResult struct {
+	gjson.Result
+}
+
+func (v *GjsonResult) UnmarshalJSON(data []byte) error {
+	// Parse the JSON data into a gjson.Result
+	v.Result = gjson.ParseBytes(data)
+	return nil
+}
+
+// Condition represents a condition inEvaluator the rule engine
 type Condition struct {
 	Priority   *int
 	Name       string
 	Operator   string
-	Value      interface{}
+	Value      GjsonResult
 	Fact       string
-	FactResult interface{}
-	Result     interface{}
+	FactResult gjson.Result
+	Result     bool
 	Params     map[string]interface{}
-	Path       string
 	Condition  string
 	All        []*Condition
 	Any        []*Condition
@@ -31,21 +41,16 @@ func (c *Condition) Validate() error {
 		return errors.New("priority must be greater than zero")
 	}
 
+	valueExists := c.Value.Exists() && c.Value.Type != gjson.Null
 	// Validate that if any of Value, Fact, or Operator are set, all three must be set
-	if c.Value != nil || c.Operator != "" || c.Fact != "" {
-		if c.Value == nil || c.Operator == "" || c.Fact == "" {
+	if valueExists || c.Operator != "" || c.Fact != "" {
+		if !valueExists || c.Operator == "" || c.Fact == "" {
 			return errors.New("if value, operator, or fact are set, all three must be provided")
 		}
 	}
-
 	// If Any, All, or Not are set, Value, Operator, and Fact must not be set
-	if (len(c.Any) > 0 || len(c.All) > 0 || c.Not != nil) && (c.Value != nil || c.Operator != "" || c.Fact != "") {
+	if (len(c.Any) > 0 || len(c.All) > 0 || c.Not != nil) && (valueExists || c.Operator != "" || c.Fact != "") {
 		return errors.New("value, operator, and fact must not be set if any, all, or not conditions are provided")
-	}
-
-	// Path should only be set if Value is set
-	if c.Path != "" && c.Value == nil {
-		return errors.New("path can only be set if value is provided")
 	}
 
 	return nil
@@ -54,7 +59,7 @@ func (c *Condition) Validate() error {
 // UnmarshalJSON is a custom JSON unmarshaller for the Condition struct with validation
 func (c *Condition) UnmarshalJSON(data []byte) error {
 	// Create a temporary struct to hold the incoming data
-	type Alias Condition // Alias to avoid infinite recursion in UnmarshalJSON
+	type Alias Condition // Alias to avoid infinite recursion inEvaluator UnmarshalJSON
 	temp := &struct {
 		*Alias
 	}{
@@ -118,17 +123,11 @@ func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 		props["operator"] = c.Operator
 		props["value"] = c.Value
 		props["fact"] = c.Fact
-		if c.FactResult != nil {
-			props["factResult"] = c.FactResult
-		}
-		if c.Result != nil {
-			props["result"] = c.Result
-		}
+		props["factResult"] = c.FactResult
+		props["result"] = c.Result
+
 		if c.Params != nil {
 			props["params"] = c.Params
-		}
-		if c.Path != "" {
-			props["path"] = c.Path
 		}
 	}
 
@@ -159,17 +158,14 @@ func (c *Condition) Evaluate(almanac *Almanac, operatorMap map[string]Operator) 
 		return nil, fmt.Errorf("Unknown operator: %s", c.Operator)
 	}
 
-	rightHandSideValue, err := almanac.GetValue(c.Value)
-	if err != nil {
-		return nil, err
-	}
-	leftHandSideValue, err := almanac.FactValue(c.Fact, c.Params, c.Path)
+	rightHandSideValue := c.Value.Result
+	leftHandSideValue, err := almanac.FactValue(c.Fact)
 	if err != nil {
 		return nil, err
 	}
 
 	result := op.Evaluate(leftHandSideValue, rightHandSideValue)
-	Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue, c.Operator, rightHandSideValue, result))
+	Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue.Value(), c.Operator, rightHandSideValue.Value(), result))
 
 	return &EvaluationResult{
 		Result:             result,

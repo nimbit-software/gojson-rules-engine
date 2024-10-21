@@ -95,7 +95,7 @@ func BenchmarkRuleEngineBasic(b *testing.B) {
 	b.ResetTimer()
 	start := time.Now()
 	for i := 0; i < b.N; i++ {
-		_, err := engine.Run(ctx, testData[i%len(testData)])
+		_, err := engine.RunWithMap(ctx, testData[i%len(testData)])
 		if err != nil {
 			b.Fatalf("Engine run failed: %v", err)
 		}

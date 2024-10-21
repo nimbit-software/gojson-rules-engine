@@ -17,19 +17,19 @@ type RuleResult struct {
 
 // NewRuleResult creates a new RuleResult instance
 func NewRuleResult(conditions Condition, event Event, priority int, name string) *RuleResult {
-	var clonedConditions Condition
-	err := DeepCopy(&conditions, &clonedConditions)
-	if err != nil {
-		panic("Failed to clone event")
-	}
-	var clonedEvent Event
-	err = DeepCopy(&event, &clonedEvent)
-	if err != nil {
-		panic("Failed to clone event")
-	}
+
+	//clonedConditions := *conditions.DeepCopy()
+	//if &clonedConditions == nil {
+	//	panic("Failed to clone event")
+	//}
+	//var clonedEvent Event
+	//err := DeepCloneEvent(&event, &clonedEvent)
+	//if err != nil {
+	//	panic("Failed to clone event")
+	//}
 	return &RuleResult{
-		Conditions: clonedConditions,
-		Event:      clonedEvent,
+		Conditions: conditions,
+		Event:      event,
 		Priority:   priority,
 		Name:       name,
 		Result:     nil,
@@ -54,14 +54,24 @@ func (rr *RuleResult) ResolveEventParams(almanac *Almanac) error {
 			wg.Add(1)
 			go func(key string, value interface{}) {
 				defer wg.Done()
-				resolvedValue, err := almanac.GetValue(value)
-				if err != nil {
-					errorsCh <- err
-					return
+				// check if value is a string
+				if IsObjectLike(value) {
+					valMap, ok := value.(map[string]interface{})
+					if ok {
+						if factPath, ok := valMap["fact"].(string); ok {
+							resolvedValue, err := almanac.GetValue(factPath)
+							if err != nil {
+								errorsCh <- err
+								return
+							}
+
+							mu.Lock()
+							rr.Event.Params[key] = resolvedValue
+							mu.Unlock()
+						}
+					}
 				}
-				mu.Lock()
-				rr.Event.Params[key] = resolvedValue
-				mu.Unlock()
+
 			}(key, value)
 		}
 

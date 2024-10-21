@@ -6,16 +6,14 @@
         "priority": 10,
         "all": [
           {
-            "fact": "user",
-            "path": "$.firstName",
+            "fact": "user.lastName",
             "operator": "includes",
             "value": "a"
           },
           {
-            "fact": "",
+            "fact": "personalFoulCount",
             "operator": "greaterThanInclusive",
-            "value": 5,
-            "path": "personalFoulCount"
+            "value": 5
           }
         ]
       },
@@ -40,12 +38,10 @@
     "type": "compare facts",
     "params": {
       "firstName": {
-        "fact": "user",
-        "path": "$.firstName"
+        "fact": "user.firstName"
       },
       "lastName": {
-        "fact": "user",
-        "path": "$.lastName"
+        "fact": "user.lastName"
       }
     }
   }

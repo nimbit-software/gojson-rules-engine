@@ -2,8 +2,10 @@ package rulesengine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"sort"
 	"sync"
 
@@ -15,7 +17,6 @@ func DefaultRuleEngineOptions() *RuleEngineOptions {
 		AllowUndefinedFacts:       false,
 		AllowUndefinedConditions:  false,
 		ReplaceFactsInEventParams: false,
-		PathResolver:              nil,
 	}
 }
 
@@ -33,7 +34,6 @@ func NewEngine(rules []*Rule, options *RuleEngineOptions) *Engine {
 		AllowUndefinedConditions:  options.AllowUndefinedConditions,
 		AllowUndefinedFacts:       options.AllowUndefinedFacts,
 		ReplaceFactsInEventParams: options.ReplaceFactsInEventParams,
-		PathResolver:              nil, // TODO
 	}
 
 	for _, r := range rules {
@@ -81,7 +81,7 @@ func (e *Engine) AddRules(rules []*Rule) error {
 	return nil
 }
 
-// UpdateRule updates a rule in the engine
+// UpdateRule updates a rule inEvaluator the engine
 func (e *Engine) UpdateRule(r *Rule) error {
 	ruleIndex := -1
 	for i, ruleInEngine := range e.Rules {
@@ -140,28 +140,6 @@ func (e *Engine) GetRules() []*Rule {
 	return e.Rules
 }
 
-// SetCondition sets a condition that can be referenced by the given name
-//func (e *Engine) SetCondition(name string, conditions map[string]interface{}) error {
-//	if name == "" {
-//		return errors.New("engine: setCondition() requires name")
-//	}
-//	if conditions == nil {
-//		return errors.New("engine: setCondition() requires conditions")
-//	}
-//	if _, ok := conditions["all"]; !ok {
-//		if _, ok := conditions["any"]; !ok {
-//			if _, ok := conditions["not"]; !ok {
-//				if _, ok := conditions["condition"]; !ok {
-//					return errors.New(`"conditions" root must contain a single instance of "all", "any", "not", or "condition"`)
-//				}
-//			}
-//		}
-//	}
-//	cond, _ := NewCondition(conditions)
-//	e.Conditions.Store(name, cond)
-//	return nil
-//}
-
 // RemoveCondition removes a condition that has previously been added to this engine
 func (e *Engine) RemoveCondition(name string) bool {
 	_, ok := e.Conditions.Load(name)
@@ -172,7 +150,7 @@ func (e *Engine) RemoveCondition(name string) bool {
 }
 
 // AddOperator adds a custom operator definition
-func (e *Engine) AddOperator(operatorOrName interface{}, cb func(interface{}, interface{}) bool) {
+func (e *Engine) AddOperator(operatorOrName interface{}, cb func(gjson.Result, gjson.Result) bool) {
 	var op Operator
 	switch v := operatorOrName.(type) {
 	case Operator:
@@ -201,38 +179,38 @@ func (e *Engine) RemoveOperator(operatorOrName interface{}) bool {
 	return ok
 }
 
-// AddFact adds a fact definition to the engine
-func (e *Engine) AddFact(id interface{}, valueOrMethod interface{}, options *FactOptions) *Engine {
-	var factId string
-	var f *Fact
-	switch v := id.(type) {
-	case *Fact:
-		factId = v.ID
-		f = v
-	case string:
-		factId = v
-		f, _ = NewFact(factId, valueOrMethod, options)
-	}
-	Debug(fmt.Sprintf("engine::addFact id:%s", factId))
-	e.Facts.Store(factId, f)
-	return e
-}
-
-// RemoveFact removes a fact definition from the engine
-func (e *Engine) RemoveFact(factOrId interface{}) bool {
-	var factId string
-	switch v := factOrId.(type) {
-	case *Fact:
-		factId = v.ID
-	case string:
-		factId = v
-	}
-	_, ok := e.Facts.Load(factId)
-	if ok {
-		e.Facts.Delete(factId)
-	}
-	return ok
-}
+//// AddFact adds a fact definition to the engine
+//func (e *Engine) AddFact(id interface{}, valueOrMethod interface{}, options *FactOptions) *Engine {
+//	var factId string
+//	var f *Fact
+//	switch v := id.(type) {
+//	case *Fact:
+//		factId = v.ID
+//		f = v
+//	case string:
+//		factId = v
+//		f, _ = NewFact(factId, valueOrMethod, options)
+//	}
+//	Debug(fmt.Sprintf("engine::addFact id:%s", factId))
+//	e.Facts.Store(factId, f)
+//	return e
+//}
+//
+//// RemoveFact removes a fact definition from the engine
+//func (e *Engine) RemoveFact(factOrId interface{}) bool {
+//	var factId string
+//	switch v := factOrId.(type) {
+//	case *Fact:
+//		factId = v.ID
+//	case string:
+//		factId = v
+//	}
+//	_, ok := e.Facts.Load(factId)
+//	if ok {
+//		e.Facts.Delete(factId)
+//	}
+//	return ok
+//}
 
 // PrioritizeRules iterates over the engine rules, organizing them by highest -> lowest priority
 func (e *Engine) PrioritizeRules() [][]*Rule {
@@ -263,14 +241,14 @@ func (e *Engine) Stop() *Engine {
 	return e
 }
 
-// GetFact returns a fact by fact-id
-func (e *Engine) GetFact(factId string) *Fact {
-	f, _ := e.Facts.Load(factId)
-	if f == nil {
-		return nil
-	}
-	return f.(*Fact)
-}
+//// GetFact returns a fact by fact-id
+//func (e *Engine) GetFact(factId string) *Fact {
+//	f, _ := e.Facts.Load(factId)
+//	if f == nil {
+//		return nil
+//	}
+//	return f.(*Fact)
+//}
 
 // EvaluateRules runs an array of rules
 func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionContext) error {
@@ -295,7 +273,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 
 			select {
 			case <-ctx.Done():
-				Debug("Context cancelled in goroutine")
+				Debug("Context cancelled inEvaluator goroutine")
 				return
 			default:
 				ruleResult, err := rule.Evaluate(ctx, almanac)
@@ -306,7 +284,7 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 
 				Debug(fmt.Sprintf("engine::run ruleResult:%v", ruleResult.Result))
 				results <- ruleResult
-				Debug("Result sent to results channel in goroutine")
+				Debug("Result sent to results channel inEvaluator goroutine")
 			}
 		}(r)
 	}
@@ -350,8 +328,20 @@ func (e *Engine) EvaluateRules(rules []*Rule, almanac *Almanac, ctx *ExecutionCo
 	return nil
 }
 
+func (e *Engine) Run(ctx context.Context, input []byte) (map[string]interface{}, error) {
+	return e.runInternal(ctx, input)
+}
+
+func (e *Engine) RunWithMap(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	factBytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling input map: %v", err)
+	}
+	return e.runInternal(ctx, factBytes)
+}
+
 // Run runs the rules engine
-func (e *Engine) Run(ctx context.Context, input interface{}) (map[string]interface{}, error) {
+func (e *Engine) runInternal(ctx context.Context, facts []byte) (map[string]interface{}, error) {
 	var err error
 	defer func() {
 		if r := recover(); r != nil {
@@ -362,35 +352,15 @@ func (e *Engine) Run(ctx context.Context, input interface{}) (map[string]interfa
 	Debug("engine::run started")
 	e.Status = RUNNING
 
-	almanacInstance := NewAlmanac(Options{
-		PathResolver:        &e.PathResolver,
-		AllowUndefinedFacts: &e.AllowUndefinedFacts,
-	})
+	parsedFacts := gjson.ParseBytes(facts)
 
-	switch v := input.(type) {
-	case []byte:
-		err = parseAndAddFacts(v, almanacInstance)
-		if err != nil {
-			return nil, err
-		}
-	case map[string]interface{}:
-		for factId, value := range v {
-			var f *Fact
-			if factInstance, ok := value.(*Fact); ok {
-				f = factInstance
-			} else {
-				f, _ = NewFact(factId, value, nil)
-			}
-			almanacInstance.AddFact(f, nil, nil)
-			Debug(fmt.Sprintf("engine::run initialized runtime fact:%s with %v<%T>", f.ID, f.Value, f.Value))
-		}
-	default:
-		return nil, fmt.Errorf("invalid input type")
-	}
+	almanacInstance := NewAlmanac(parsedFacts, Options{
+		AllowUndefinedFacts: &e.AllowUndefinedFacts,
+	}, len(e.Rules))
 
 	e.Facts.Range(func(_, value interface{}) bool {
-		f := value.(*Fact)
-		almanacInstance.AddFact(f, nil, nil)
+		//f := value.(*Fact)
+		//almanacInstance.AddFact(f, nil, nil)
 		return true
 	})
 
@@ -421,12 +391,12 @@ func (e *Engine) Run(ctx context.Context, input interface{}) (map[string]interfa
 
 	// Safely dereference ruleResults before iterating
 	if ruleResults != nil {
-		for _, ruleResult := range *ruleResults {
+		for _, ruleResult := range ruleResults {
 			// Safely check if ruleResult.Result is not nil and true
 			if ruleResult.Result != nil && *ruleResult.Result {
-				results = append(results, ruleResult)
+				results = append(results, &ruleResult)
 			} else {
-				failureResults = append(failureResults, ruleResult)
+				failureResults = append(failureResults, &ruleResult)
 			}
 		}
 	}

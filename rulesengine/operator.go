@@ -2,17 +2,18 @@ package rulesengine
 
 import (
 	"errors"
+	"github.com/tidwall/gjson"
 )
 
-// Operator represents an operator in the rule engine
+// Operator represents an operator inEvaluator the rule engine
 type Operator struct {
 	Name               string
-	Callback           func(factValue, jsonValue interface{}) bool
-	FactValueValidator func(factValue interface{}) bool
+	Callback           func(factValue, jsonValue gjson.Result) bool
+	FactValueValidator func(factValue gjson.Result) bool
 }
 
 // NewOperator creates a new Operator instance
-func NewOperator(name string, cb func(factValue, jsonValue interface{}) bool, factValueValidator func(factValue interface{}) bool) (*Operator, error) {
+func NewOperator(name string, cb func(factValue, jsonValue gjson.Result) bool, factValueValidator func(factValue gjson.Result) bool) (*Operator, error) {
 	if name == "" {
 		return nil, errors.New("Missing operator name")
 	}
@@ -20,7 +21,7 @@ func NewOperator(name string, cb func(factValue, jsonValue interface{}) bool, fa
 		return nil, errors.New("Missing operator callback")
 	}
 	if factValueValidator == nil {
-		factValueValidator = func(factValue interface{}) bool { return true }
+		factValueValidator = func(factValue gjson.Result) bool { return true }
 	}
 	return &Operator{
 		Name:               name,
@@ -30,6 +31,6 @@ func NewOperator(name string, cb func(factValue, jsonValue interface{}) bool, fa
 }
 
 // Evaluate takes the fact result and compares it to the condition 'value' using the callback
-func (o *Operator) Evaluate(factValue, jsonValue interface{}) bool {
+func (o *Operator) Evaluate(factValue, jsonValue gjson.Result) bool {
 	return o.FactValueValidator(factValue) && o.Callback(factValue, jsonValue)
 }

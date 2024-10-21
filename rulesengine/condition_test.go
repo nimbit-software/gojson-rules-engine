@@ -2,6 +2,7 @@ package rulesengine
 
 import (
 	"encoding/json"
+	"github.com/tidwall/gjson"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    "someValue",
+				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
@@ -36,7 +37,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    "someValue",
+				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
@@ -60,7 +61,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "equal",
-					Value:    "someValue",
+					Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 					Fact:     "", // missing fact
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -70,7 +71,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "",
-					Value:    "someValue",
+					Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 					Fact:     "factName", // missing operator
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -80,7 +81,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "equal",
-					Value:    nil, // missing value
+					Value:    GjsonResult{}, // missing value
 					Fact:     "factName",
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -112,7 +113,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    "someValue",
+				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 				All:      []*Condition{{Priority: &priority}}, // All is set, but Value, Fact, Operator are also set
 			},
 			Event: EventConfig{Type: "TestEvent"},
@@ -125,19 +126,21 @@ func TestCondition(t *testing.T) {
 	})
 
 	// Test that Path can only be set if Value is provided
-	t.Run("TestRuleConfigPathRequiresValue", func(t *testing.T) {
+	t.Run("TestRuleConfigFactRequiresValue", func(t *testing.T) {
 		priority := 1
 		ruleConfig := RuleConfig{
 			Name: "Test Rule",
 			Conditions: Condition{
 				Priority: &priority,
-				Path:     "somePath", // Path is set, but Value is nil
+				Operator: "equal",
+				Fact:     "",
+				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
 
 		err := ruleConfig.Conditions.Validate()
-		if err == nil || err.Error() != "path can only be set if value is provided" {
+		if err == nil || err.Error() != "if value, operator, or fact are set, all three must be provided" {
 			t.Errorf("Expected path validation error, but got: %v", err)
 		}
 	})
@@ -150,7 +153,7 @@ func TestCondition(t *testing.T) {
             "priority": 1,
             "operator": "equal",
             "fact": "factName",
-            "value": "someValue"
+            "value": ""
         },
         "event": {
             "type": "TestEvent"

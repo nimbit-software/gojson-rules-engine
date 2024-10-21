@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asaskevich/EventBus"
+	"github.com/tidwall/gjson"
 	"sync"
 )
 
@@ -21,10 +22,10 @@ type DynamicFactCallback func(params map[string]interface{}, almanac *Almanac) i
 type EventCallback func(result *RuleResult) interface{}
 
 type EvaluationResult struct {
-	Result             bool        `json:"Result"`
-	LeftHandSideValue  interface{} `json:"LeftHandSideValue"`
-	RightHandSideValue interface{} `json:"RightHandSideValue"`
-	Operator           string      `json:"Operator"`
+	Result             bool         `json:"Result"`
+	LeftHandSideValue  gjson.Result `json:"LeftHandSideValue"`
+	RightHandSideValue gjson.Result `json:"RightHandSideValue"`
+	Operator           string       `json:"Operator"`
 }
 
 const (
@@ -56,7 +57,7 @@ type TopLevelCondition struct {
 // EventHandler represents an event handler function.
 type EventHandler func(event Event, almanac Almanac, ruleResult RuleResult)
 
-// ConditionProperties represents a condition in the rule.
+// ConditionProperties represents a condition inEvaluator the rule.
 type ConditionProperties struct {
 	Fact     string                 `json:"fact"`
 	Operator string                 `json:"operator"`
@@ -75,15 +76,30 @@ func (c *ConditionProperties) SetName(name string) {
 	c.Name = &name
 }
 
+type ConditionMap struct {
+	sync.Map
+}
+
+func (m *ConditionMap) Load(key string) (Condition, bool) {
+	val, ok := m.Map.Load(key)
+	if !ok {
+		return Condition{}, false
+	}
+	return val.(Condition), ok
+}
+
+func (m *ConditionMap) Store(key string, value Condition) {
+	m.Map.Store(key, value)
+}
+
 type Engine struct {
 	Rules                     []*Rule
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver
 	Operators                 map[string]Operator
 	Facts                     sync.Map
-	Conditions                sync.Map
+	Conditions                ConditionMap
 	Status                    string
 	prioritizedRules          [][]*Rule
 	bus                       EventBus.Bus
@@ -94,7 +110,6 @@ type RuleEngineOptions struct {
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver
 }
 
 type RuleConfig struct {
