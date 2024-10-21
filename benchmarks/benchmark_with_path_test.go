@@ -60,7 +60,7 @@ func BenchmarkRuleEngineWithPath(b *testing.B) {
 		b.Fatalf("Failed to unmarshal rule JSON: %v", err)
 	}
 
-	//testDataByte := generateTestDataByte(b.N)
+	testDataByte := generateTestDataByte(b.N)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -79,15 +79,6 @@ func BenchmarkRuleEngineWithPath(b *testing.B) {
 	var wg sync.WaitGroup
 	chunkSize := b.N / numGoroutines
 
-	facts := []byte(`{
-            "personalFoulCount": 4,
-            "gameDuration": 40,
-            "name": "John",
-            "user": {
-                "lastName": "Jones",
-				"gameDuration": 40
-            }
-        }`)
 	for g := 0; g < numGoroutines; g++ {
 		wg.Add(1)
 		go func(g int) {
@@ -98,7 +89,7 @@ func BenchmarkRuleEngineWithPath(b *testing.B) {
 				endIndex = b.N
 			}
 			for i := startIndex; i < endIndex; i++ {
-				_, err := engine.Run(ctx, facts)
+				_, err := engine.Run(ctx, testDataByte[i])
 				if err != nil {
 					b.Fatalf("Engine run failed: %v", err)
 				}
