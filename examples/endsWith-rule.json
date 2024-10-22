@@ -6,10 +6,29 @@
         "priority": 10,
         "all": [
           {
-            "fact": "user",
-            "path": "$.firstName",
+            "fact": "user.lastName",
             "operator": "includes",
             "value": "a"
+          },
+          {
+            "fact": "personalFoulCount",
+            "operator": "greaterThanInclusive",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "priority": 4,
+        "all": [
+          {
+            "fact": "gameDuration",
+            "operator": "equal",
+            "value": 48
+          },
+          {
+            "fact": "personalFoulCount",
+            "operator": "greaterThanInclusive",
+            "value": 6
           }
         ]
       }
@@ -19,12 +38,10 @@
     "type": "compare facts",
     "params": {
       "firstName": {
-        "fact": "user",
-        "path": "$.firstName"
+        "fact": "user.firstName"
       },
       "lastName": {
-        "fact": "user",
-        "path": "$.lastName"
+        "fact": "user.lastName"
       }
     }
   }

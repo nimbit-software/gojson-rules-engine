@@ -1,100 +1,196 @@
 package rulesengine
 
 import (
+	"encoding/json"
 	"testing"
 )
 
-func TestNewCondition(t *testing.T) {
-	t.Run("Valid priority types", func(t *testing.T) {
-		testCases := []struct {
-			name     string
-			priority interface{}
-			expected int
-		}{
-			{"float64", float64(2.0), 2},
-			{"float32", float32(2.0), 2},
-			{"int64", int64(3), 3},
-			{"int", 4, 4},
+func TestCondition(t *testing.T) {
+
+	// Test a valid RuleConfig with a valid Condition
+	t.Run("TestValidRuleConfig", func(t *testing.T) {
+		priority := 1
+		ruleConfig := RuleConfig{
+			Name:     "Test Rule",
+			Priority: nil, // optional priority
+			Conditions: Condition{
+				Priority: &priority,
+				Operator: "equal",
+				Fact:     "factName",
+				Value:    ValueNode{Type: String, String: "someValue"},
+			},
+			Event: EventConfig{Type: "TestEvent"},
 		}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				conditions := map[string]interface{}{
-					"all": []interface{}{
-						map[string]interface{}{
-							"fact":     "age",
-							"operator": "greaterThan",
-							"value":    18,
-							"priority": tc.priority,
-						},
-					},
-				}
-
-				condition, err := NewCondition(conditions)
-				if err != nil {
-					t.Errorf("Expected condition creation to succeed, but got error: %v", err)
-				}
-				if condition.All[0].Priority != tc.expected {
-					t.Errorf("Expected priority to be %d, but got %d", tc.expected, condition.All[0].Priority)
-				}
-			})
+		if err := ruleConfig.Conditions.Validate(); err != nil {
+			t.Errorf("Expected RuleConfig to be valid, but got error: %v", err)
 		}
 	})
 
-	t.Run("Invalid priority types", func(t *testing.T) {
-		testCases := []struct {
-			name     string
-			priority interface{}
-		}{
-			{"string", "invalid"},
-			{"bool", true},
-			{"slice", []int{1, 2, 3}},
-			{"map", map[string]int{"priority": 5}},
-			{"negative int", -1},
-			{"zero", 0},
+	// Test that RuleConfig returns an error when Condition's priority is invalid
+	t.Run("TestRuleConfigInvalidPriority", func(t *testing.T) {
+		priority := 0
+		ruleConfig := RuleConfig{
+			Name: "Test Rule",
+			Conditions: Condition{
+				Priority: &priority,
+				Operator: "equal",
+				Fact:     "factName",
+				Value:    ValueNode{Type: String, String: "someValue"},
+			},
+			Event: EventConfig{Type: "TestEvent"},
 		}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				conditions := map[string]interface{}{
-					"all": []interface{}{
-						map[string]interface{}{
-							"fact":     "age",
-							"operator": "greaterThan",
-							"value":    18,
-							"priority": tc.priority,
-						},
-					},
-				}
-
-				condition, err := NewCondition(conditions)
-				if err == nil {
-					t.Errorf("Expected condition creation to fail, but got no error")
-				}
-				if condition != nil {
-					t.Errorf("Expected condition to be nil, but got %v", condition)
-				}
-			})
+		err := ruleConfig.Conditions.Validate()
+		if err == nil || err.Error() != "priority must be greater than zero" {
+			t.Errorf("Expected priority validation error, but got: %v", err)
 		}
 	})
 
-	t.Run("Default priority", func(t *testing.T) {
-		conditions := map[string]interface{}{
-			"all": []interface{}{
-				map[string]interface{}{
-					"fact":     "age",
-					"operator": "greaterThan",
-					"value":    18,
+	// Test that RuleConfig returns an error when Value, Fact, or Operator are missing
+	t.Run(" TestRuleConfigMissingValueFactOperator", func(t *testing.T) {
+		priority := 1
+		testCases := []struct {
+			name       string
+			conditions Condition
+			errMsg     string
+		}{
+			{
+				name: "Missing Fact",
+				conditions: Condition{
+					Priority: &priority,
+					Operator: "equal",
+					Value:    ValueNode{Type: String, String: "someValue"},
+					Fact:     "", // missing fact
 				},
+				errMsg: "if value, operator, or fact are set, all three must be provided",
+			},
+			{
+				name: "Missing Operator",
+				conditions: Condition{
+					Priority: &priority,
+					Operator: "",
+					Value:    ValueNode{Type: String, String: "someValue"},
+					Fact:     "factName", // missing operator
+				},
+				errMsg: "if value, operator, or fact are set, all three must be provided",
+			},
+			{
+				name: "Missing Value",
+				conditions: Condition{
+					Priority: &priority,
+					Operator: "equal",
+					Value:    ValueNode{Type: Null}, // missing value
+					Fact:     "factName",
+				},
+				errMsg: "if value, operator, or fact are set, all three must be provided",
 			},
 		}
 
-		condition, err := NewCondition(conditions)
-		if err != nil {
-			t.Errorf("Expected condition creation to succeed, but got error: %v", err)
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				ruleConfig := RuleConfig{
+					Name:       "Test Rule",
+					Conditions: tc.conditions,
+					Event:      EventConfig{Type: "TestEvent"},
+				}
+
+				err := ruleConfig.Conditions.Validate()
+				if err == nil || err.Error() != tc.errMsg {
+					t.Errorf("Expected error: %v, but got: %v", tc.errMsg, err)
+				}
+			})
 		}
-		if condition.All[0].Priority != 0 {
-			t.Errorf("Expected priority to be 0 (default), but got %d", condition.All[0].Priority)
+	})
+
+	// Test mutual exclusion of Any, All, and Not with Value, Fact, and Operator
+	t.Run("TestRuleConfigMutualExclusion", func(t *testing.T) {
+		priority := 1
+		ruleConfig := RuleConfig{
+			Name: "Test Rule",
+			Conditions: Condition{
+				Priority: &priority,
+				Operator: "equal",
+				Fact:     "factName",
+				Value:    ValueNode{Type: String, String: "someValue"},
+				All:      []*Condition{{Priority: &priority}}, // All is set, but Value, Fact, Operator are also set
+			},
+			Event: EventConfig{Type: "TestEvent"},
+		}
+
+		err := ruleConfig.Conditions.Validate()
+		if err == nil || err.Error() != "value, operator, and fact must not be set if any, all, or not conditions are provided" {
+			t.Errorf("Expected mutual exclusion validation error, but got: %v", err)
+		}
+	})
+
+	// Test that Path can only be set if Value is provided
+	t.Run("TestRuleConfigFactRequiresValue", func(t *testing.T) {
+		priority := 1
+		ruleConfig := RuleConfig{
+			Name: "Test Rule",
+			Conditions: Condition{
+				Priority: &priority,
+				Operator: "equal",
+				Fact:     "",
+				Value:    ValueNode{Type: String, String: "someValue"},
+			},
+			Event: EventConfig{Type: "TestEvent"},
+		}
+
+		err := ruleConfig.Conditions.Validate()
+		if err == nil || err.Error() != "if value, operator, or fact are set, all three must be provided" {
+			t.Errorf("Expected path validation error, but got: %v", err)
+		}
+	})
+
+	// Test unmarshalling valid RuleConfig JSON
+	t.Run("TestUnmarshalValidRuleConfig", func(t *testing.T) {
+		jsonData := []byte(`{
+        "name": "Test Rule",
+        "conditions": {
+            "priority": 1,
+            "operator": "equal",
+            "fact": "factName",
+            "value": ""
+        },
+        "event": {
+            "type": "TestEvent"
+        }
+    }`)
+
+		var ruleConfig RuleConfig
+		err := json.Unmarshal(jsonData, &ruleConfig)
+		if err != nil {
+			t.Errorf("Expected successful unmarshal, but got error: %v", err)
+		}
+
+		if *ruleConfig.Conditions.Priority != 1 {
+			t.Errorf("Expected priority to be 1, got %d", ruleConfig.Conditions.Priority)
+		}
+		if ruleConfig.Conditions.Operator != "equal" {
+			t.Errorf("Expected operator to be 'equal', got %s", ruleConfig.Conditions.Operator)
+		}
+	})
+
+	// Test unmarshalling invalid RuleConfig JSON (missing fact)
+	t.Run("TestUnmarshalInvalidRuleConfig", func(t *testing.T) {
+		jsonData := []byte(`{
+        "name": "Test Rule",
+        "conditions": {
+            "priority": 1,
+            "operator": "equal",
+            "value": "someValue"
+        },
+        "event": {
+            "type": "TestEvent"
+        }
+    }`)
+
+		var ruleConfig RuleConfig
+		err := json.Unmarshal(jsonData, &ruleConfig)
+		if err == nil || err.Error() != "if value, operator, or fact are set, all three must be provided" {
+			t.Errorf("Expected unmarshalling error for missing fact, but got: %v", err)
 		}
 	})
 }

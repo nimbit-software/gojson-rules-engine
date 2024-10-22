@@ -7,116 +7,92 @@ import (
 	"reflect"
 )
 
-// Condition represents a condition in the rule engine
+// Condition represents an individual condition within a rule in the rules engine.
+// Conditions can compare facts to values using operators, and they can also nest other conditions.
+// Fields:
+// - Priority: Optional priority of the condition, must be greater than zero if set.
+// - Name: The name of the condition.
+// - Operator: The operator to be applied for comparison (e.g., equals, greaterThan).
+// - Value: The value to compare the fact to.
+// - Fact: The fact that is being evaluated in the condition.
+// - FactResult: The result of fact evaluation.
+// - Result: The evaluation result of the condition (true/false).
+// - Params: Additional parameters that may affect the condition's evaluation.
+// - Condition: Raw condition string (for debugging or custom use cases).
+// - All, Any: Nested conditions that require all or any of the sub-conditions to be true.
+// - Not: A nested condition that negates its result.
 type Condition struct {
-	Priority   int
+	Priority   *int
 	Name       string
 	Operator   string
-	Value      interface{}
+	Value      ValueNode
 	Fact       string
-	FactResult interface{}
-	Result     interface{}
+	FactResult Fact
+	Result     bool
 	Params     map[string]interface{}
-	Path       string
 	Condition  string
 	All        []*Condition
 	Any        []*Condition
 	Not        *Condition
 }
 
-func (c *Condition) SetPriority(priority int) {
-	c.Priority = priority
-}
-
-// NewCondition creates a new Condition instance
-func NewCondition(properties map[string]interface{}) (*Condition, error) {
-	if properties == nil {
-		return nil, errors.New("condition: constructor options required")
+// Validate checks if the Condition is valid based on business rules.
+// It verifies that if a value, fact, or operator are set, all three must be set.
+// It also ensures that if nested conditions (Any, All, Not) are provided, no value, fact, or operator is set.
+// Returns an error if the condition is invalid
+func (c *Condition) Validate() error {
+	// Validate priority (must be greater than 0 if set)
+	if c.Priority != nil && *c.Priority <= 0 {
+		return errors.New("priority must be greater than zero")
 	}
 
-	cond := &Condition{}
-	booleanOperator := booleanOperator(properties)
-
-	if booleanOperator != "" {
-		subConditions, subConditionsIsArray := properties[booleanOperator].([]interface{})
-		if booleanOperator != "not" && !subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" must be an array`, booleanOperator)
-		}
-		if booleanOperator == "not" && subConditionsIsArray {
-			return nil, fmt.Errorf(`"%s" cannot be an array`, booleanOperator)
-		}
-
-		cond.Operator = booleanOperator
-
-		if priority, err := ParsePriority(properties); err == nil {
-			cond.Priority = priority
-		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
-			return nil, err
-		} else {
-			cond.Priority = 1
-		}
-
-		if subConditionsIsArray {
-			for _, sc := range subConditions {
-				subCondMap, ok := sc.(map[string]interface{})
-				if !ok {
-					return nil, errors.New("invalid sub-condition format")
-				}
-				subCond, err := NewCondition(subCondMap)
-				if err != nil {
-					return nil, err
-				}
-				if booleanOperator == "all" {
-					cond.All = append(cond.All, subCond)
-				} else {
-					cond.Any = append(cond.Any, subCond)
-				}
-			}
-		} else {
-			subCondMap, ok := properties[booleanOperator].(map[string]interface{})
-			if !ok {
-				return nil, errors.New("invalid sub-condition format")
-			}
-			subCond, err := NewCondition(subCondMap)
-			if err != nil {
-				return nil, err
-			}
-			cond.Not = subCond
-		}
-	} else {
-		if _, ok := properties["fact"]; !ok {
-			return nil, errors.New(`condition: constructor "fact" property required`)
-		}
-		if _, ok := properties["operator"]; !ok {
-			return nil, errors.New(`condition: constructor "operator" property required`)
-		}
-		if _, ok := properties["value"]; !ok {
-			return nil, errors.New(`condition: constructor "value" property required`)
-		}
-
-		cond.Fact = properties["fact"].(string)
-		if path, ok := properties["path"]; ok {
-			cond.Path = path.(string)
-		} else {
-			cond.Path = ""
-		}
-		cond.Operator = properties["operator"].(string)
-		cond.Value = properties["value"]
-		if priority, err := ParsePriority(properties); err == nil {
-			cond.Priority = priority
-		} else if err.Code == "INVALID_PRIORITY_TYPE" || err.Code == "INVALID_PRIORITY_VALUE" {
-			return nil, err
+	valueExists := c.Value.Type != Null || (c.Value.Type != String && c.Value.String != "")
+	// Validate that if any of Value, Fact, or Operator are set, all three must be set
+	if valueExists || c.Operator != "" || c.Fact != "" {
+		if !valueExists || c.Operator == "" || c.Fact == "" {
+			return errors.New("if value, operator, or fact are set, all three must be provided")
 		}
 	}
+	// If Any, All, or Not are set, Value, Operator, and Fact must not be set
+	if (len(c.Any) > 0 || len(c.All) > 0 || c.Not != nil) && (valueExists || c.Operator != "" || c.Fact != "") {
+		return errors.New("value, operator, and fact must not be set if any, all, or not conditions are provided")
+	}
 
-	return cond, nil
+	return nil
 }
 
-// ToJSON converts the condition to a JSON-friendly structure
+// UnmarshalJSON is a custom JSON unmarshaller for the Condition struct.
+// It validates the condition after unmarshalling to ensure it adheres to the rules.
+// Params:
+// - data: JSON data representing the condition.
+// Returns an error if the condition is invalid after unmarshalling.
+func (c *Condition) UnmarshalJSON(data []byte) error {
+	// Create a temporary struct to hold the incoming data
+	type Alias Condition // Alias to avoid infinite recursion inEvaluator UnmarshalJSON
+	temp := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	// Unmarshal the JSON data into the temp struct
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// Validate the condition after unmarshaling
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ToJSON converts the Condition instance to a JSON string representation.
+// Useful for serializing the condition for storage or transmission.
 func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 	props := map[string]interface{}{}
-	if c.Priority != 0 {
-		props["priority"] = c.Priority
+	if c.Priority != nil {
+		props["priority"] = *c.Priority
 	}
 	if c.Name != "" {
 		props["name"] = c.Name
@@ -157,17 +133,11 @@ func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 		props["operator"] = c.Operator
 		props["value"] = c.Value
 		props["fact"] = c.Fact
-		if c.FactResult != nil {
-			props["factResult"] = c.FactResult
-		}
-		if c.Result != nil {
-			props["result"] = c.Result
-		}
+		props["factResult"] = c.FactResult
+		props["result"] = c.Result
+
 		if c.Params != nil {
 			props["params"] = c.Params
-		}
-		if c.Path != "" {
-			props["path"] = c.Path
 		}
 	}
 
@@ -198,33 +168,37 @@ func (c *Condition) Evaluate(almanac *Almanac, operatorMap map[string]Operator) 
 		return nil, fmt.Errorf("Unknown operator: %s", c.Operator)
 	}
 
-	rightHandSideValue, err := almanac.GetValue(c.Value)
-	if err != nil {
-		return nil, err
-	}
-	leftHandSideValue, err := almanac.FactValue(c.Fact, c.Params, c.Path)
+	rightHandSideValue := c.Value
+	leftHandSideValue, err := almanac.FactValue(c.Fact)
 	if err != nil {
 		return nil, err
 	}
 
-	result := op.Evaluate(leftHandSideValue, rightHandSideValue)
-	Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue, c.Operator, rightHandSideValue, result))
+	var result bool
+	if leftHandSideValue != nil && leftHandSideValue.Value != nil {
+		result = op.Evaluate(leftHandSideValue.Value, &rightHandSideValue)
+		// TODO VALUE
+		Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue.Value.Raw(), c.Operator, rightHandSideValue, result))
+	}
 
-	return &EvaluationResult{
+	res := &EvaluationResult{
 		Result:             result,
-		LeftHandSideValue:  leftHandSideValue,
 		RightHandSideValue: rightHandSideValue,
 		Operator:           c.Operator,
-	}, nil
+	}
+	if leftHandSideValue != nil {
+		res.LeftHandSideValue = *leftHandSideValue
+	}
+	return res, nil
 }
 
 // booleanOperator returns the boolean operator for the condition
-func booleanOperator(condition map[string]interface{}) string {
-	if _, ok := condition["any"]; ok {
+func booleanOperator(condition *Condition) string {
+	if len(condition.Any) > 0 {
 		return "any"
-	} else if _, ok := condition["all"]; ok {
+	} else if len(condition.All) > 0 {
 		return "all"
-	} else if _, ok := condition["not"]; ok {
+	} else if condition.Not != nil {
 		return "not"
 	}
 	return ""
@@ -232,6 +206,9 @@ func booleanOperator(condition map[string]interface{}) string {
 
 // booleanOperator returns the condition's boolean operator
 func (c *Condition) booleanOperator() string {
+	if c == nil {
+		return ""
+	}
 	if c.All != nil {
 		return "all"
 	}

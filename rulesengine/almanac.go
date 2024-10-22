@@ -3,66 +3,76 @@ package rulesengine
 import (
 	"errors"
 	"fmt"
-	"github.com/buger/jsonparser"
-	"github.com/oliveagle/jsonpath"
-	"sync"
+	"github.com/tidwall/gjson"
 )
 
-// PathResolver is a shared_types alias for a function that resolves a path within a JSON-like structure
-type PathResolver func(value interface{}, path string) (interface{}, error)
+type EventOutcome string
 
-// DefaultPathResolver is the default function to resolve a path within a JSON-like structure
-func DefaultPathResolver(value interface{}, path string) (interface{}, error) {
-	res, err := jsonpath.JsonPathLookup(value, path)
-	return res, err
-}
+const (
+	Success EventOutcome = "success"
+	Failure EventOutcome = "failure"
+)
 
-// Almanac represents fact results lookup and caching
+// Almanac is a struct that manages fact results lookup and caching within a rules engine.
+// It allows storing raw facts, caching results of rules, and logging events (success/failure).
+// The Almanac plays a key role in the rules engine by allowing rules to evaluate facts efficiently.
 type Almanac struct {
-	factMap             sync.Map
-	factResultsCache    sync.Map
-	allowUndefinedFacts bool
-	pathResolver        PathResolver
-	events              *map[string][]interface{} // TODO USE REAL TYPE
-	ruleResults         *[]*RuleResult
+	factMap             FactMap                  // A map storing facts for quick lookup
+	allowUndefinedFacts bool                     // Flag to allow or disallow undefined facts
+	events              map[EventOutcome][]Event // Maps success or failure outcomes to their events
+	ruleResults         []RuleResult             // A slice to store rule evaluation results
+	rawFacts            gjson.Result             // The raw input facts in JSON format
+	ruleResultsCapacity int                      // Initial capacity for rule results to optimize memory
 }
 
+// Options defines the optional settings for the Almanac.
+// It includes a flag to allow or disallow the use of undefined facts during rule evaluation.
 type Options struct {
-	AllowUndefinedFacts *bool
-	PathResolver        *PathResolver
+	AllowUndefinedFacts *bool // Optional flag to allow undefined facts
 }
 
-// NewAlmanac creates a new Almanac instance
-func NewAlmanac(options Options) *Almanac {
+// NewAlmanac creates and returns a new Almanac instance.
+// Params:
+// - rf: Raw facts in the form of a gjson.Result.
+// - options: Custom settings such as allowing undefined facts.
+// - initialCapacity: The initial capacity to allocate for rule results.
+// Returns a pointer to a new Almanac.
+func NewAlmanac(rf gjson.Result, options Options, initialCapacity int) *Almanac {
 	allowUndefinedFacts := false
 	if options.AllowUndefinedFacts != nil {
 		allowUndefinedFacts = *options.AllowUndefinedFacts
 	}
-	pathResolver := DefaultPathResolver
-	if *(options.PathResolver) != nil {
-		pathResolver = *options.PathResolver
-	}
 
 	return &Almanac{
+		rawFacts:            rf,
 		allowUndefinedFacts: allowUndefinedFacts,
-		pathResolver:        pathResolver,
-		events:              &map[string][]interface{}{"success": {}, "failure": {}},
-		ruleResults:         &[]*RuleResult{},
+		events:              map[EventOutcome][]Event{"success": {}, "failure": {}},
+		ruleResults:         make([]RuleResult, 0, initialCapacity),
+		ruleResultsCapacity: initialCapacity,
 	}
 }
 
-// AddEvent adds a success or failure event
-func (a *Almanac) AddEvent(event interface{}, outcome string) error {
-	if outcome != "success" && outcome != "failure" {
+// AddEvent logs an event in the Almanac, marking it as either a success or failure.
+// Params:
+// - event: The event to be added.
+// - outcome: The outcome of the event ("success" or "failure").
+// Returns an error if the outcome is invalid.
+func (a *Almanac) AddEvent(event Event, outcome EventOutcome) error {
+	if outcome != Success && outcome != Failure {
 		return errors.New(`outcome required: "success" | "failure"`)
 	}
-	(*a.events)[outcome] = append((*a.events)[outcome], event)
+	(a.events)[outcome] = append((a.events)[outcome], event)
 	return nil
 }
 
-// GetEvents retrieves events based on the outcome
-func (a *Almanac) GetEvents(outcome string) *[]interface{} {
-	eventsMap := *a.events // Dereference the pointer to access the map
+// GetEvents retrieves events logged in the Almanac based on the specified outcome.
+// If the outcome is "success" or "failure", it returns the events for that outcome.
+// If the outcome is an empty string, it returns all events (success and failure combined).
+// Params:
+// - outcome: The desired outcome ("success", "failure", or empty string for all events).
+// Returns a pointer to a slice of events for the specified outcome.
+func (a *Almanac) GetEvents(outcome EventOutcome) *[]Event {
+	eventsMap := a.events
 	if outcome != "" {
 		// Return a pointer to the slice for the specified outcome
 		events, exists := eventsMap[outcome]
@@ -70,7 +80,7 @@ func (a *Almanac) GetEvents(outcome string) *[]interface{} {
 			return &events
 		}
 		// Return nil or an empty slice pointer if the outcome does not exist
-		return &[]interface{}{}
+		return &[]Event{}
 	}
 
 	// Combine "success" and "failure" slices if outcome is an empty string
@@ -78,233 +88,87 @@ func (a *Almanac) GetEvents(outcome string) *[]interface{} {
 	return &combinedEvents
 }
 
-// AddResult adds a rule result
+// AddResult adds a rule evaluation result to the Almanac.
+// This function stores the result of a rule once it has been evaluated.
 func (a *Almanac) AddResult(ruleResult *RuleResult) {
-	*a.ruleResults = append(*a.ruleResults, ruleResult)
+	if len(a.ruleResults) == a.ruleResultsCapacity {
+		// Double the capacity when we need to grow
+		newCapacity := a.ruleResultsCapacity * 2
+		if newCapacity == 0 {
+			newCapacity = 4 // Start with a small capacity if it was initially 0
+		}
+		newSlice := make([]RuleResult, len(a.ruleResults), newCapacity)
+		copy(newSlice, a.ruleResults)
+		a.ruleResults = newSlice
+		a.ruleResultsCapacity = newCapacity
+	}
+	a.ruleResults = append(a.ruleResults, *ruleResult)
 }
 
 // GetResults retrieves all rule results
-func (a *Almanac) GetResults() *[]*RuleResult {
+func (a *Almanac) GetResults() []RuleResult {
 	return a.ruleResults
 }
 
-// getFact retrieves a fact by its ID
-func (a *Almanac) getFact(factId string) (*Fact, error) {
-	value, ok := a.factMap.Load(factId)
-	if !ok {
-		return nil, fmt.Errorf("undefined fact: %s", factId)
-	}
-	f, ok := value.(*Fact)
-	if !ok {
-		return nil, fmt.Errorf("invalid fact shared_types for fact: %s", factId)
-	}
-	return f, nil
-}
-
-// addConstantFact adds a constant fact
-func (a *Almanac) addConstantFact(f *Fact) {
-	a.factMap.Store(f.ID, f)
-	a.setFactValue(f, map[string]interface{}{}, f.Value)
-}
-
-// setFactValue sets the computed value of a fact
-func (a *Almanac) setFactValue(f *Fact, params map[string]interface{}, value interface{}) {
-	cacheKey, _ := f.GetCacheKey(params)
-	factValue := value
-	if cacheKey != 0 {
-		a.factResultsCache.Store(cacheKey, factValue)
-	}
-}
-
-// AddFact adds a fact definition to the engine
-func (a *Almanac) AddFact(id interface{}, valueOrMethod interface{}, options *FactOptions) *Almanac {
-	var factId string
-	var f *Fact
-	switch v := id.(type) {
-	case *Fact:
-		factId = v.ID
-		f = v
-	case string:
-		factId = v
-		f, _ = NewFact(factId, valueOrMethod, options)
-	default:
-		Debug("invalid shared_types for id")
-		return a
-	}
-	Debug(fmt.Sprintf("almanac::addFact id:%s", factId))
-	a.factMap.Store(factId, f)
-	if f.IsConstant() {
-		a.setFactValue(f, map[string]interface{}{}, f.Value)
-	}
-	return a
+func (a *Almanac) AddFact(key string, value *Fact) {
+	a.factMap.Set(key, value)
 }
 
 // AddRuntimeFact adds a constant fact during runtime
-func (a *Almanac) AddRuntimeFact(factId string, value interface{}) {
-	Debug(fmt.Sprintf("almanac::addRuntimeFact id:%s", factId))
-	f, _ := NewFact(factId, value, nil)
-	a.addConstantFact(f)
+func (a *Almanac) AddRuntimeFact(path string, value ValueNode) error {
+	Debug(fmt.Sprintf("almanac::addRuntimeFact id:%s", path))
+	f, err := NewFact(path, value, nil)
+	if err != nil {
+		return err
+	}
+	a.AddFact(f.Path, f)
+	return nil
 }
 
-// FactValue returns the value of a fact
-func (a *Almanac) FactValue(factId string, params map[string]interface{}, path string) (interface{}, error) {
-	f, err := a.getFact(factId)
-	if err != nil {
+func (a *Almanac) FactValue(path string) (*Fact, error) {
+	// Check if the fact is in the cache
+	f, ok := a.factMap.Load(path)
+	if ok {
+		return f, nil
+	}
+
+	// If the fact is not in try to read it from the raw facts
+	result := a.rawFacts.Get(path)
+
+	if !result.Exists() {
 		if a.allowUndefinedFacts {
 			return nil, nil
 		}
-		return nil, &UndefinedFactError{Message: fmt.Sprintf("Undefined fact: %s", factId)}
+		return nil, fmt.Errorf("undefined fact: %s", path)
 	}
-
-	var factValue interface{}
-	if f.IsConstant() {
-		factValue = f.Calculate(params, a)
-	} else {
-		cacheKey, _ := f.GetCacheKey(params)
-		if cacheVal, ok := a.factResultsCache.Load(cacheKey); ok {
-			factValue = cacheVal
-			Debug(fmt.Sprintf("almanac::factValue cache hit for fact:%s", factId))
-		} else {
-			Debug(fmt.Sprintf("almanac::factValue cache miss for fact:%s; calculating", factId))
-			factValue = f.Calculate(params, a)
-			a.setFactValue(f, params, factValue)
-		}
+	vn := NewValueFromGjson(result)
+	// Create a new fact and add it to the cache
+	nf, err := NewFact(path, *vn, nil)
+	if err != nil {
+		return nil, err
 	}
-
-	if path != "" {
-		Debug(fmt.Sprintf("condition::evaluate extracting object property %s", path))
-		if IsObjectLike(factValue) {
-			pathValue, err := a.pathResolver(factValue, path)
-			if err != nil {
-				if a.allowUndefinedFacts {
-					return nil, nil
-				}
-				return nil, &UndefinedFactError{Message: fmt.Sprintf("Undefined fact: %s", factId)}
-			}
-			Debug(fmt.Sprintf("condition::evaluate extracting object property %s, received: %v", path, pathValue))
-			return pathValue, nil
-		}
-		Debug(fmt.Sprintf("condition::evaluate could not compute object path(%s) of non-object: %v <%T>; continuing with %v", path, factValue, factValue, factValue))
-	}
-	return factValue, nil
+	a.AddFact(path, nf)
+	return nf, nil
 }
 
-// GetValue interprets value as either a primitive or a fact
-func (a *Almanac) GetValue(value interface{}) (interface{}, error) {
-	if IsObjectLike(value) {
-		valMap, ok := value.(map[string]interface{})
-		if ok {
-			if factId, ok := valMap["fact"].(string); ok {
-				// Extract params and path
-				params := map[string]interface{}{}
-				if p, ok := valMap["params"]; ok {
-					params = p.(map[string]interface{})
-				}
-				path := ""
-				if p, ok := valMap["path"]; ok {
-					path = p.(string)
-				}
-				return a.FactValue(factId, params, path)
-			}
-		}
+func (a *Almanac) GetValue(path string) (interface{}, error) {
+	f, err := a.FactValue(path)
+	if err != nil || f == nil || f.Value == nil {
+		return nil, nil
 	}
-	return value, nil
-}
-
-// parseAndAddFacts parses the JSON input and adds facts to the Almanac
-func parseAndAddFacts(jsonInput []byte, almanac *Almanac) error {
-	var parseError error
-
-	parseError = jsonparser.ObjectEach(jsonInput, func(key []byte, value []byte, dataType jsonparser.ValueType, offset int) error {
-		keyStr := string(key)
-		switch dataType {
-		case jsonparser.String:
-			strValue, err := jsonparser.ParseString(value)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			fact, err := NewFact(keyStr, strValue, nil)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			almanac.AddFact(fact, nil, nil)
-		case jsonparser.Number:
-			numValue, err := jsonparser.ParseFloat(value)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			fact, err := NewFact(keyStr, numValue, nil)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			almanac.AddFact(fact, nil, nil)
-		case jsonparser.Boolean:
-			boolValue, err := jsonparser.ParseBoolean(value)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			fact, err := NewFact(keyStr, boolValue, nil)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			almanac.AddFact(fact, nil, nil)
-		case jsonparser.Object:
-			// If value is an object, parse recursively
-			objValue := make(map[string]interface{})
-			parseError = jsonparser.ObjectEach(value, func(subKey []byte, subValue []byte, subDataType jsonparser.ValueType, subOffset int) error {
-				subKeyStr := string(subKey)
-				switch subDataType {
-				case jsonparser.String:
-					strValue, err := jsonparser.ParseString(subValue)
-					if err != nil {
-						parseError = err
-						return err
-					}
-					objValue[subKeyStr] = strValue
-				case jsonparser.Number:
-					numValue, err := jsonparser.ParseFloat(subValue)
-					if err != nil {
-						parseError = err
-						return err
-					}
-					objValue[subKeyStr] = numValue
-				case jsonparser.Boolean:
-					boolValue, err := jsonparser.ParseBoolean(subValue)
-					if err != nil {
-						parseError = err
-						return err
-					}
-					objValue[subKeyStr] = boolValue
-				default:
-					parseError = errors.New("unsupported data type")
-					return parseError
-				}
-				return nil
-			})
-			if parseError != nil {
-				return parseError
-			}
-			fact, err := NewFact(keyStr, objValue, nil)
-			if err != nil {
-				parseError = err
-				return err
-			}
-			almanac.AddFact(fact, nil, nil)
-		default:
-			parseError = errors.New("unsupported data type")
-			return parseError
-		}
-		return nil
-	})
-	if parseError != nil {
-		return parseError
+	switch f.Value.Type {
+	case String:
+		return f.Value.String, nil
+	case Number:
+		return f.Value.Number, nil
+	case Object:
+		return f.Value.Object, nil
+	case Array:
+		return f.Value.Array, nil
+	case Bool:
+		return f.Value.Bool, nil
+	case Null:
+		return nil, nil
 	}
-
-	return parseError
+	return nil, nil
 }

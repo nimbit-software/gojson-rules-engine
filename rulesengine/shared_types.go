@@ -1,6 +1,8 @@
 package rulesengine
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/asaskevich/EventBus"
 	"sync"
 )
@@ -15,12 +17,12 @@ type FactOptions struct {
 	Priority int
 }
 
-type DynamicFactCallback func(params map[string]interface{}, almanac *Almanac) interface{}
+type DynamicFactCallback func(almanac *Almanac, params ...interface{}) *ValueNode
 type EventCallback func(result *RuleResult) interface{}
 
 type EvaluationResult struct {
 	Result             bool        `json:"Result"`
-	LeftHandSideValue  interface{} `json:"LeftHandSideValue"`
+	LeftHandSideValue  Fact        `json:"LeftHandSideValue"`
 	RightHandSideValue interface{} `json:"RightHandSideValue"`
 	Operator           string      `json:"Operator"`
 }
@@ -54,7 +56,7 @@ type TopLevelCondition struct {
 // EventHandler represents an event handler function.
 type EventHandler func(event Event, almanac Almanac, ruleResult RuleResult)
 
-// ConditionProperties represents a condition in the rule.
+// ConditionProperties represents a condition inEvaluator the rule.
 type ConditionProperties struct {
 	Fact     string                 `json:"fact"`
 	Operator string                 `json:"operator"`
@@ -73,15 +75,34 @@ func (c *ConditionProperties) SetName(name string) {
 	c.Name = &name
 }
 
+type ConditionMap struct {
+	sync.Map
+}
+
+func (m *ConditionMap) Load(key string) (Condition, bool) {
+	val, ok := m.Map.Load(key)
+	if !ok {
+		return Condition{}, false
+	}
+	return val.(Condition), ok
+}
+
+func (m *ConditionMap) Store(key string, value Condition) {
+	m.Map.Store(key, value)
+}
+
+// Engine represents the core of the rules engine, responsible for managing and executing rules.
+// It holds the rules, operators, and configuration options needed to evaluate facts against conditions.
+// The engine also manages the event bus used for dispatching events during rule execution.
+
 type Engine struct {
 	Rules                     []*Rule
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver
 	Operators                 map[string]Operator
-	Facts                     sync.Map
-	Conditions                sync.Map
+	Facts                     FactMap
+	Conditions                ConditionMap
 	Status                    string
 	prioritizedRules          [][]*Rule
 	bus                       EventBus.Bus
@@ -92,5 +113,36 @@ type RuleEngineOptions struct {
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
-	PathResolver              PathResolver
+}
+
+type RuleConfig struct {
+	Name       string      `json:"name"`
+	Priority   *int        `json:"priority"`
+	Conditions Condition   `json:"conditions"`
+	Event      EventConfig `json:"event"`
+	OnSuccess  func(result *RuleResult) interface{}
+	OnFailure  func(result *RuleResult) interface{}
+}
+
+// UnmarshalJSON is a custom JSON unmarshaller for RuleConfig to ensure proper unmarshaling of Condition
+func (r *RuleConfig) UnmarshalJSON(data []byte) error {
+	// Define an alias to avoid recursion
+	type Alias RuleConfig
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	}
+
+	// Unmarshal the data into the auxiliary struct
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Now manually unmarshal and validate the Conditions field
+	if err := json.Unmarshal(data, &r.Conditions); err != nil {
+		return fmt.Errorf("failed to unmarshal conditions: %v", err)
+	}
+
+	return nil
 }
