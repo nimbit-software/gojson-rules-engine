@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
+	rulesEngine "github.com/nimbit-software/gojson-rules-engine"
 )
 
 func generateBasicTestData(n int) []map[string]interface{} {

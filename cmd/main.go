@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/nimbit-software/gojson-rules-engine/rulesengine"
+	re "github.com/nimbit-software/gojson-rules-engine"
 )
 
 func main() {
@@ -54,26 +54,26 @@ func main() {
 	defer cancel()
 
 	// ENGINE OPTIONS
-	ep := &rulesengine.RuleEngineOptions{
+	ep := &re.RuleEngineOptions{
 		AllowUndefinedFacts:       true,
 		ReplaceFactsInEventParams: true,
 		AllowUndefinedConditions:  true,
 	}
 
-	var ruleConfig rulesengine.RuleConfig
+	var ruleConfig re.RuleConfig
 	if err := json.Unmarshal(ruleRaw, &ruleConfig); err != nil {
 		panic(err)
 	}
 
-	engine := rulesengine.NewEngine(nil, ep)
+	engine := re.NewEngine(nil, ep)
 
-	err := engine.AddCalculatedFact("personalFoulLimit", func(a *rulesengine.Almanac, params ...interface{}) *rulesengine.ValueNode {
-		return &rulesengine.ValueNode{Type: rulesengine.Number, Number: 50}
+	err := engine.AddCalculatedFact("personalFoulLimit", func(a *re.Almanac, params ...interface{}) *re.ValueNode {
+		return &re.ValueNode{Type: re.Number, Number: 50}
 	}, nil)
 
-	err = engine.AddFact("test.fact", &rulesengine.ValueNode{Type: rulesengine.Number, Number: 50}, nil)
+	err = engine.AddFact("test.fact", &re.ValueNode{Type: re.Number, Number: 50}, nil)
 
-	rule, err := rulesengine.NewRule(&ruleConfig)
+	rule, err := re.NewRule(&ruleConfig)
 	err = engine.AddRule(rule)
 
 	facts := []byte(`{

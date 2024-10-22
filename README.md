@@ -146,7 +146,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
+    rulesEngine "github.com/nimbit-software/gojson-rules-engine/cmd"
     "os"
 )
 

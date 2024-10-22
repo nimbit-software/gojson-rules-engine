@@ -10,7 +10,7 @@ import (
 	"time"
 
 	faker "github.com/go-faker/faker/v4"
-	rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
+	rulesEngine "github.com/nimbit-software/gojson-rules-engine"
 )
 
 func generateTestData(n int) []map[string]interface{} {
