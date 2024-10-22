@@ -4,28 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tidwall/gjson"
 	"reflect"
 )
 
-type GjsonResult struct {
-	gjson.Result
-}
-
-func (v *GjsonResult) UnmarshalJSON(data []byte) error {
-	// Parse the JSON data into a gjson.Result
-	v.Result = gjson.ParseBytes(data)
-	return nil
-}
-
-// Condition represents a condition inEvaluator the rule engine
+// Condition represents an individual condition within a rule in the rules engine.
+// Conditions can compare facts to values using operators, and they can also nest other conditions.
+// Fields:
+// - Priority: Optional priority of the condition, must be greater than zero if set.
+// - Name: The name of the condition.
+// - Operator: The operator to be applied for comparison (e.g., equals, greaterThan).
+// - Value: The value to compare the fact to.
+// - Fact: The fact that is being evaluated in the condition.
+// - FactResult: The result of fact evaluation.
+// - Result: The evaluation result of the condition (true/false).
+// - Params: Additional parameters that may affect the condition's evaluation.
+// - Condition: Raw condition string (for debugging or custom use cases).
+// - All, Any: Nested conditions that require all or any of the sub-conditions to be true.
+// - Not: A nested condition that negates its result.
 type Condition struct {
 	Priority   *int
 	Name       string
 	Operator   string
-	Value      GjsonResult
+	Value      ValueNode
 	Fact       string
-	FactResult gjson.Result
+	FactResult Fact
 	Result     bool
 	Params     map[string]interface{}
 	Condition  string
@@ -34,14 +36,17 @@ type Condition struct {
 	Not        *Condition
 }
 
-// Validate checks if the Condition is valid based on the business rules
+// Validate checks if the Condition is valid based on business rules.
+// It verifies that if a value, fact, or operator are set, all three must be set.
+// It also ensures that if nested conditions (Any, All, Not) are provided, no value, fact, or operator is set.
+// Returns an error if the condition is invalid
 func (c *Condition) Validate() error {
 	// Validate priority (must be greater than 0 if set)
 	if c.Priority != nil && *c.Priority <= 0 {
 		return errors.New("priority must be greater than zero")
 	}
 
-	valueExists := c.Value.Exists() && c.Value.Type != gjson.Null
+	valueExists := c.Value.Type != Null || (c.Value.Type != String && c.Value.String != "")
 	// Validate that if any of Value, Fact, or Operator are set, all three must be set
 	if valueExists || c.Operator != "" || c.Fact != "" {
 		if !valueExists || c.Operator == "" || c.Fact == "" {
@@ -56,7 +61,11 @@ func (c *Condition) Validate() error {
 	return nil
 }
 
-// UnmarshalJSON is a custom JSON unmarshaller for the Condition struct with validation
+// UnmarshalJSON is a custom JSON unmarshaller for the Condition struct.
+// It validates the condition after unmarshalling to ensure it adheres to the rules.
+// Params:
+// - data: JSON data representing the condition.
+// Returns an error if the condition is invalid after unmarshalling.
 func (c *Condition) UnmarshalJSON(data []byte) error {
 	// Create a temporary struct to hold the incoming data
 	type Alias Condition // Alias to avoid infinite recursion inEvaluator UnmarshalJSON
@@ -78,7 +87,8 @@ func (c *Condition) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ToJSON converts the condition to a JSON-friendly structure
+// ToJSON converts the Condition instance to a JSON string representation.
+// Useful for serializing the condition for storage or transmission.
 func (c *Condition) ToJSON(stringify bool) (interface{}, error) {
 	props := map[string]interface{}{}
 	if c.Priority != nil {
@@ -158,21 +168,28 @@ func (c *Condition) Evaluate(almanac *Almanac, operatorMap map[string]Operator) 
 		return nil, fmt.Errorf("Unknown operator: %s", c.Operator)
 	}
 
-	rightHandSideValue := c.Value.Result
+	rightHandSideValue := c.Value
 	leftHandSideValue, err := almanac.FactValue(c.Fact)
 	if err != nil {
 		return nil, err
 	}
 
-	result := op.Evaluate(leftHandSideValue, rightHandSideValue)
-	Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue.Value(), c.Operator, rightHandSideValue.Value(), result))
+	var result bool
+	if leftHandSideValue != nil && leftHandSideValue.Value != nil {
+		result = op.Evaluate(leftHandSideValue.Value, &rightHandSideValue)
+		// TODO VALUE
+		Debug(fmt.Sprintf(`condition::evaluate <%v %s %v?> (%v)`, leftHandSideValue.Value.Raw(), c.Operator, rightHandSideValue, result))
+	}
 
-	return &EvaluationResult{
+	res := &EvaluationResult{
 		Result:             result,
-		LeftHandSideValue:  leftHandSideValue,
 		RightHandSideValue: rightHandSideValue,
 		Operator:           c.Operator,
-	}, nil
+	}
+	if leftHandSideValue != nil {
+		res.LeftHandSideValue = *leftHandSideValue
+	}
+	return res, nil
 }
 
 // booleanOperator returns the boolean operator for the condition

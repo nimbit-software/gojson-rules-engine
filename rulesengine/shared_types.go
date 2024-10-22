@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asaskevich/EventBus"
-	"github.com/tidwall/gjson"
 	"sync"
 )
 
@@ -18,14 +17,14 @@ type FactOptions struct {
 	Priority int
 }
 
-type DynamicFactCallback func(params map[string]interface{}, almanac *Almanac) interface{}
+type DynamicFactCallback func(almanac *Almanac, params ...interface{}) *ValueNode
 type EventCallback func(result *RuleResult) interface{}
 
 type EvaluationResult struct {
-	Result             bool         `json:"Result"`
-	LeftHandSideValue  gjson.Result `json:"LeftHandSideValue"`
-	RightHandSideValue gjson.Result `json:"RightHandSideValue"`
-	Operator           string       `json:"Operator"`
+	Result             bool        `json:"Result"`
+	LeftHandSideValue  Fact        `json:"LeftHandSideValue"`
+	RightHandSideValue interface{} `json:"RightHandSideValue"`
+	Operator           string      `json:"Operator"`
 }
 
 const (
@@ -92,13 +91,17 @@ func (m *ConditionMap) Store(key string, value Condition) {
 	m.Map.Store(key, value)
 }
 
+// Engine represents the core of the rules engine, responsible for managing and executing rules.
+// It holds the rules, operators, and configuration options needed to evaluate facts against conditions.
+// The engine also manages the event bus used for dispatching events during rule execution.
+
 type Engine struct {
 	Rules                     []*Rule
 	AllowUndefinedFacts       bool
 	AllowUndefinedConditions  bool
 	ReplaceFactsInEventParams bool
 	Operators                 map[string]Operator
-	Facts                     sync.Map
+	Facts                     FactMap
 	Conditions                ConditionMap
 	Status                    string
 	prioritizedRules          [][]*Rule

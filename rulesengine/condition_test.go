@@ -2,7 +2,6 @@ package rulesengine
 
 import (
 	"encoding/json"
-	"github.com/tidwall/gjson"
 	"testing"
 )
 
@@ -18,7 +17,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+				Value:    ValueNode{Type: String, String: "someValue"},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
@@ -37,7 +36,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+				Value:    ValueNode{Type: String, String: "someValue"},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}
@@ -61,7 +60,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "equal",
-					Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+					Value:    ValueNode{Type: String, String: "someValue"},
 					Fact:     "", // missing fact
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -71,7 +70,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "",
-					Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+					Value:    ValueNode{Type: String, String: "someValue"},
 					Fact:     "factName", // missing operator
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -81,7 +80,7 @@ func TestCondition(t *testing.T) {
 				conditions: Condition{
 					Priority: &priority,
 					Operator: "equal",
-					Value:    GjsonResult{}, // missing value
+					Value:    ValueNode{Type: Null}, // missing value
 					Fact:     "factName",
 				},
 				errMsg: "if value, operator, or fact are set, all three must be provided",
@@ -113,7 +112,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "factName",
-				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+				Value:    ValueNode{Type: String, String: "someValue"},
 				All:      []*Condition{{Priority: &priority}}, // All is set, but Value, Fact, Operator are also set
 			},
 			Event: EventConfig{Type: "TestEvent"},
@@ -134,7 +133,7 @@ func TestCondition(t *testing.T) {
 				Priority: &priority,
 				Operator: "equal",
 				Fact:     "",
-				Value:    GjsonResult{gjson.ParseBytes([]byte(`"someValue"`))},
+				Value:    ValueNode{Type: String, String: "someValue"},
 			},
 			Event: EventConfig{Type: "TestEvent"},
 		}

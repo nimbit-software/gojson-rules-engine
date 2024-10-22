@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	rulesEngine "github.com/nimbit-software/gojson-rules-engine/rulesengine"
+	"github.com/nimbit-software/gojson-rules-engine/rulesengine"
 )
 
 func main() {
@@ -19,23 +19,24 @@ func main() {
             "fact": "gameDuration",
             "operator": "equal",
             "value": 40
-          },
-          {
-			"priority": 11,
-            "fact": "use.lastName",
-            "operator": "=",
-            "value": "Jones"
           }
-        ]
+        ],
+		"all": [
+			{
+			"priority": 10,
+            "fact": "personalFoulLimit",
+            "operator": ">",
+            "value": 60
+          },
+		 {
+			"priority": 10,
+            "fact": "personalFoulLimit",
+            "operator": "<",
+            "value": 60
+          }
+		]
       }
-    ],
-	"all": [
-		{
-			"fact": "user.lastName",
-			"operator": "includes",
-			"value": "Jo"
-		}
-	]
+    ]
   },
   "event": {
     "type": "fouledOut",
@@ -53,20 +54,26 @@ func main() {
 	defer cancel()
 
 	// ENGINE OPTIONS
-	ep := &rulesEngine.RuleEngineOptions{
+	ep := &rulesengine.RuleEngineOptions{
 		AllowUndefinedFacts:       true,
 		ReplaceFactsInEventParams: true,
 		AllowUndefinedConditions:  true,
 	}
 
-	var ruleConfig rulesEngine.RuleConfig
+	var ruleConfig rulesengine.RuleConfig
 	if err := json.Unmarshal(ruleRaw, &ruleConfig); err != nil {
 		panic(err)
 	}
 
-	engine := rulesEngine.NewEngine(nil, ep)
+	engine := rulesengine.NewEngine(nil, ep)
 
-	rule, err := rulesEngine.NewRule(&ruleConfig)
+	err := engine.AddCalculatedFact("personalFoulLimit", func(a *rulesengine.Almanac, params ...interface{}) *rulesengine.ValueNode {
+		return &rulesengine.ValueNode{Type: rulesengine.Number, Number: 50}
+	}, nil)
+
+	err = engine.AddFact("test.fact", &rulesengine.ValueNode{Type: rulesengine.Number, Number: 50}, nil)
+
+	rule, err := rulesengine.NewRule(&ruleConfig)
 	err = engine.AddRule(rule)
 
 	facts := []byte(`{
@@ -79,9 +86,6 @@ func main() {
             }
         }`)
 
-	// THE RUN FUNCTION ACCEPTS BOTH A MAP AND A BYTE ARRAY
-	// - []byte (byte array offers slightly better performance) under the hood github.com/buger/jsonparser is used to parse it into the almanac
-	// - map[string]interface{}
 	res, err := engine.Run(ctx, facts)
 	if err != nil {
 		panic(err)

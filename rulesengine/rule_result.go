@@ -17,16 +17,6 @@ type RuleResult struct {
 
 // NewRuleResult creates a new RuleResult instance
 func NewRuleResult(conditions Condition, event Event, priority int, name string) *RuleResult {
-
-	//clonedConditions := *conditions.DeepCopy()
-	//if &clonedConditions == nil {
-	//	panic("Failed to clone event")
-	//}
-	//var clonedEvent Event
-	//err := DeepCloneEvent(&event, &clonedEvent)
-	//if err != nil {
-	//	panic("Failed to clone event")
-	//}
 	return &RuleResult{
 		Conditions: conditions,
 		Event:      event,
