@@ -3,6 +3,7 @@ package rulesengine
 import (
 	"errors"
 	"fmt"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -135,13 +136,16 @@ func (a *Almanac) FactValue(path string) (*Fact, error) {
 	// If the fact is not in try to read it from the raw facts
 	result := a.rawFacts.Get(path)
 
-	if !result.Exists() {
-		if a.allowUndefinedFacts {
-			return nil, nil
-		}
+	var vn *ValueNode
+
+	if result.Exists() {
+		vn = NewValueFromGjson(result)
+	} else if a.allowUndefinedFacts {
+		vn = &ValueNode{Type: Null}
+	} else {
 		return nil, fmt.Errorf("undefined fact: %s", path)
 	}
-	vn := NewValueFromGjson(result)
+
 	// Create a new fact and add it to the cache
 	nf, err := NewFact(path, *vn, nil)
 	if err != nil {
